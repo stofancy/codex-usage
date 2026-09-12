@@ -32,12 +32,63 @@ _FALLBACK_PX = (1400, 590)
 _MAX_TICKS = 12                      # x 轴最多保留的标签数（多则抽稀）
 
 
+class _ProbeStdout:
+    """终端探测期的 `sys.__stdout__` 替身：只改写入目标，终端语义沿用真实 stdout。
+
+    textual-image 在导入时按 `sys.__stdout__.isatty()` 选定渲染档位，并向它写能力查询。
+    若直接把 `__stdout__` 换成 stderr，`codex-usage --chart … 2>/dev/null` 会被判成
+    「非终端」而永久降级成字符回退，--doctor 也会报错档位；这里只把查询序列改投 stderr
+    （终端照样应答），isatty/size 仍看真实 stdout，stdout 的数据流保持干净。
+    """
+
+    def __init__(self, real, sink):
+        self._real, self._sink = real, sink
+
+    def write(self, data):
+        return self._sink.write(data)
+
+    def flush(self):
+        return self._sink.flush()
+
+    def isatty(self):
+        return self._real.isatty()
+
+    def fileno(self):
+        return self._sink.fileno()
+
+    @property
+    def encoding(self):
+        return getattr(self._real, "encoding", "utf-8")
+
+    @property
+    def errors(self):
+        return getattr(self._real, "errors", "replace")
+
+
+@lru_cache(maxsize=1)
+def _renderable():
+    """textual-image 的 renderable 模块（导入期会探测终端能力）。
+
+    探测序列由 textual-image 直接写 `sys.__stdout__`；把它引到 stderr，避免混进
+    `--json`/`--schema`/`--doctor` 的 stdout 数据流（Agent 会直接解析这些输出）。
+    """
+    original, sink = sys.__stdout__, sys.stderr
+    try:
+        if original is not None and sink is not None:
+            sys.__stdout__ = _ProbeStdout(original, sink)
+        from textual_image import renderable
+    finally:
+        sys.__stdout__ = original
+    return renderable
+
+
 @lru_cache(maxsize=1)
 def available() -> bool:
     """图片渲染依赖（matplotlib + textual-image）是否可用。"""
+    _configure()                      # 必须在导入之前：matplotlib 导入期就会发配置目录告警
     try:
         import matplotlib  # noqa: F401
-        from textual_image.renderable import Image  # noqa: F401
+        _renderable()
     except Exception:
         return False
     return True
@@ -59,18 +110,52 @@ def _cjk_font() -> str | None:
 
 @lru_cache(maxsize=1)
 def _configure() -> str | None:
-    """一次性初始化：字体选择 + 压掉库自身的诊断告警。
+    """一次性初始化：压掉库自身的诊断告警，返回选中的中文字体名。
 
-    matplotlib 的缺字告警、textual-image 探测终端格子尺寸失败时的告警（带堆栈）
-    对使用者没有可操作信息，只会夹在图表里刷屏。
+    matplotlib 的缺字/配置目录告警、textual-image 探测终端格子尺寸失败时的告警
+    （带堆栈）对使用者没有可操作信息，只会夹在图表或 --doctor 输出里刷屏。
     """
-    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
-    logging.getLogger("textual_image").setLevel(logging.ERROR)
-    name = _cjk_font()
-    if name is None:
-        print("提示: 系统未找到中文字体，图表中的中文可能显示为方框（可安装 Noto Sans CJK）",
-              file=sys.stderr)
-    return name
+    for name in ("matplotlib", "matplotlib.font_manager", "textual_image"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+    try:
+        return _cjk_font()
+    except Exception:                 # matplotlib 未安装：静音后返回「无字体」即可
+        return None
+
+
+@lru_cache(maxsize=1)
+def _warn_missing_cjk() -> None:
+    print("提示: 系统未找到中文字体，图表中的中文可能显示为方框（可安装 Noto Sans CJK）",
+          file=sys.stderr)
+
+
+@lru_cache(maxsize=1)
+def describe() -> dict:
+    """真图渲染现状（给 --doctor / --schema 用）：依赖、终端档位、光栅尺寸、中文字体。"""
+    info: dict = {"available": available(), "matplotlib": None, "textual_image": None,
+                  "display": None, "raster_px": None, "cjk_font": None}
+    if not info["available"]:
+        return info
+    import matplotlib
+
+    _configure()
+    renderable = _renderable()
+    info["matplotlib"] = matplotlib.__version__
+    try:
+        from importlib.metadata import version
+        info["textual_image"] = version("textual-image")
+    except Exception:
+        pass
+    info["display"] = {renderable.TGPImage: "真图（kitty 图形协议）",
+                       renderable.SixelImage: "真图（Sixel）",
+                       renderable.HalfcellImage: "彩色半块",
+                       renderable.UnicodeImage: "字符回退"}.get(renderable.Image, "未知")
+    info["cjk_font"] = _cjk_font()
+    try:
+        info["raster_px"] = list(_target_px())
+    except Exception:
+        pass
+    return info
 
 
 @lru_cache(maxsize=1)
@@ -80,10 +165,10 @@ def _target_px() -> tuple[int, int]:
     lines = max(12, min(_MAX_LINES, shutil.get_terminal_size().lines - 2))
     try:
         from textual_image._terminal import get_cell_size
-        from textual_image.renderable import HalfcellImage, Image, UnicodeImage
-        if Image is UnicodeImage:
+        renderable = _renderable()
+        if renderable.Image is renderable.UnicodeImage:
             return cols, lines                # 字符回退：1 字符 = 1 像素
-        if Image is HalfcellImage:
+        if renderable.Image is renderable.HalfcellImage:
             return cols, lines * 2            # 半块：每格 1 像素宽、2 像素高
         cell_w, cell_h = get_cell_size()
         return cols * cell_w, lines * cell_h
@@ -148,6 +233,8 @@ def _figure(title: str, labels: list[str] | None = None, right: float = 0.98,
     from matplotlib.ticker import FuncFormatter
 
     _configure()
+    if _cjk_font() is None:
+        _warn_missing_cjk()
     px_w, px_h = _target_px()
     sz = _sizes(px_w, px_h)
     k = sz["k"]
@@ -183,12 +270,10 @@ def _font_pt(px: float, sz: dict) -> float:
 
 def _render(fig):
     """Figure → textual-image 的 Rich renderable（宽高自适应终端，保持比例）。"""
-    from textual_image.renderable import Image
-
     buf = io.BytesIO()
     fig.canvas.print_png(buf)
     buf.seek(0)
-    return Image(buf, width="auto", height="auto")
+    return _renderable().Image(buf, width="auto", height="auto")
 
 
 def _x_layout(labels: list[str], sz: dict) -> tuple[list[int], list[str], bool]:

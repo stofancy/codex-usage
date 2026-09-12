@@ -39,6 +39,9 @@ codex-usage --chart bar --by-day --by-model --metric total        # 堆叠柱状
 codex-usage --chart area --by-day --metric cache     # 面积图：每天缓存读趋势
 codex-usage --chart bar --by-day --ascii             # 强制字符画（默认终端下优先真图）
 codex-usage --json                                   # 机器可读输出（含按模型明细）
+codex-usage --help                                   # 自说明帮助（/? 、-? 、help 等价）
+codex-usage --schema                                 # 机器可读自描述（JSON 契约）
+codex-usage --doctor                                 # 环境自检（数据源/定价/真图能力）
 ```
 
 ### 时间格式
@@ -71,8 +74,35 @@ codex-usage --json                                   # 机器可读输出（含�
 | 过滤 | `--since` `--until` `--type` `--model` `--session` `--parent` `--archived` | 只缩小范围，不改变行粒度 |
 | 图表 | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|output\|total` `--ascii` | 数据来自聚合维度，`--ascii` 强制字符画 |
 | 输出 | `--json` | 会话级 JSON，含按模型明细（含调用次数），与其他参数兼容 |
+| 自述 | `--schema` `--doctor` | 机器可读契约 / 环境自检，优先于其它参数 |
 
 无定价模型：token 照常统计，成本按 $0 计，行内标 `*`、表尾列出模型名。
+
+## 自描述与自检（给人，也给 Agent）
+
+工具不需要外部文档就能说清自己怎么用、能输出什么、当前环境是否正常。
+
+`codex-usage --help`（`/?`、`-?`、`help` 等价）分成四段：示例命令、语义约定、输出与退出码、数据源与环境变量。`codex-usage --schema` 是同一份契约的 JSON 版——选项清单直接由 argparse 定义生成，不会和实现漂移：
+
+```fish
+codex-usage --schema | jq '.options[] | select(.flags | index("--chart"))'
+codex-usage --schema | jq '.json_output.fields'        # --json 每行记录的字段含义与单位
+codex-usage --json --since 20260910 | jq -c '{id:.session_id,total:.total_tokens,calls}' | head -3
+```
+
+`codex-usage --doctor`（加 `--json` 得到结构化结果）做环境自检：会话与归档目录是否存在、有多少 rollout 文件、定价表加载了多少模型、真图依赖与终端档位、中文字体；有可操作建议时单独列出，`ok` 字段表示是否一切正常。
+
+```text
+$ codex-usage --doctor
+codex-usage 1.0.0  |  Python 3.12.13  |  Linux-...
+会话数据   ~/.codex/sessions  存在，1348 个 rollout 文件（最近 2026-09-12 23:36）
+定价表     ~/.cc-switch/model-pricing.json  存在，56 个模型
+图表渲染   真图（kitty 图形协议）（matplotlib 3.11.2 + textual-image 0.13.2，光栅 1190×760）
+中文字体   Noto Sans CJK SC
+结论: 一切正常
+```
+
+约定：数据只写到 stdout，提示与错误只写到 stderr（因此 `codex-usage --json … | jq` 不会被噪声打断）；退出码 `0` 成功、`1` 用法或运行时错误、`2` 参数解析错误、`141` 管道下游提前关闭。
 
 ## 图表
 

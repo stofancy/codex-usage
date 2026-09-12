@@ -1,0 +1,125 @@
+"""自描述与自检：帮助入口、--schema 契约、--doctor 诊断。"""
+
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from codex_usage import selfdoc
+from codex_usage.cli import build_parser
+
+MOD = "codex_usage.cli"
+
+
+def run(*args):
+    return subprocess.run([sys.executable, "-m", MOD, *args], capture_output=True, text=True, env=None)
+
+
+@pytest.mark.parametrize("flag", ["--help", "-h", "/?", "-?", "help"])
+def test_help_entry_points(flag):
+    """人读帮助的各个入口都要可用，且包含示例/语义/退出码/数据源四段。"""
+    r = run(flag)
+    assert r.returncode == 0, r.stderr[-200:]
+    assert "usage: codex-usage" in r.stdout
+    for section in ("示例:", "语义约定:", "输出与退出码:", "数据源与环境变量:"):
+        assert section in r.stdout
+
+
+def test_schema_covers_every_option():
+    """schema 的选项清单必须与 argparse 定义一致，避免自描述落后于实现。"""
+    parser = build_parser()
+    schema = selfdoc.schema(parser)
+    declared = {f for o in schema["options"] for f in o["flags"]}
+    actual = {f for a in parser._actions for f in a.option_strings}
+    assert declared == actual
+    json.dumps(schema, ensure_ascii=False)          # 必须可 JSON 序列化（Agent 要解析）
+    assert schema["schema_version"] >= 1 and schema["version"]
+    assert {"0", "1", "141"} <= set(schema["exit_codes"])
+    assert schema["examples"] and schema["enums"]["chart"] == ["pie", "bar", "area", "line"]
+
+
+def test_schema_fields_match_real_json_output(env):
+    """schema 声明的 JSON 字段与真实 --json 输出对账（防契约漂移）。"""
+    r = run("--json", "--since", "2026-09-10", "--until", "2026-09-11")
+    assert r.returncode == 0, r.stderr[-300:]
+    records = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
+    assert records
+    fields = selfdoc.schema(build_parser())["json_output"]
+    assert set(records[0]) == set(fields["fields"])
+    model = records[0]["models"]
+    assert model, "夹具里应有按模型明细"
+    assert set(next(iter(model.values()))) == set(fields["model_fields"])
+
+
+def test_schema_cli_output(env):
+    r = run("--schema")
+    assert r.returncode == 0
+    d = json.loads(r.stdout)
+    assert d["name"] == "codex-usage"
+    assert any("--chart" in o["flags"] for o in d["options"])
+
+
+def test_doctor_reports_environment(env):
+    d = selfdoc.doctor()
+    assert d["version"] and d["python"] and d["executable"]
+    assert d["data"]["sessions_dir"]["exists"] is True
+    assert d["data"]["sessions_dir"]["rollout_files"] > 0
+    assert d["data"]["pricing_file"]["models"] == 2      # 夹具定价表 2 个模型
+    assert d["render"]["tier"]
+    text = selfdoc.format_doctor(d)
+    for section in ("会话数据", "归档数据", "定价表", "图表渲染", "中文字体"):
+        assert section in text
+    assert d["ok"] is True                               # 夹具环境下不该有告警
+
+
+def test_doctor_reports_missing_sources(monkeypatch, tmp_path):
+    """数据源缺失时要给出可操作提示，而不是静默成功。"""
+    monkeypatch.setenv("CODEX_USAGE_SESSIONS_DIR", str(tmp_path / "nope"))
+    monkeypatch.setenv("CODEX_USAGE_PRICING_FILE", str(tmp_path / "nope.json"))
+    d = selfdoc.doctor()
+    assert d["ok"] is False
+    joined = " ".join(d["hints"])
+    assert "会话目录不存在" in joined and "定价表缺失" in joined
+    assert "需要注意:" in selfdoc.format_doctor(d)
+
+
+def test_doctor_cli_json(env):
+    r = run("--doctor", "--json")
+    assert r.returncode == 0
+    d = json.loads(r.stdout)
+    assert d["data"]["sessions_dir"]["rollout_files"] > 0
+    assert "hints" in d
+
+
+@pytest.mark.skipif(os.name != "posix", reason="需要 pty")
+def test_doctor_json_clean_under_pty(env):
+    """真实终端（pty）下自检 JSON 也必须可直接解析：终端探测序列走 stderr，别污染 stdout。"""
+    import fcntl
+    import pty
+    import struct
+    import termios
+
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 110, 0, 0))
+    child_env = {**os.environ, "TERM": "xterm-256color", "COLUMNS": "110", "LINES": "40"}
+    proc = subprocess.Popen([sys.executable, "-m", MOD, "--doctor", "--json"],
+                            stdin=slave, stdout=slave, stderr=subprocess.PIPE, env=child_env)
+    os.close(slave)
+    out = b""
+    while True:
+        try:
+            chunk = os.read(master, 65536)
+        except OSError:
+            break
+        if not chunk:
+            break
+        out += chunk
+    os.close(master)
+    proc.wait()
+    stderr = proc.stderr.read().decode("utf-8", "replace")
+    report = json.loads(out.decode("utf-8", "replace").replace("\r\n", "\n"))
+    assert report["render"]["stdout_is_tty"] is True
+    assert report["render"]["tier"]
+    assert "\x1b" in stderr or stderr == ""      # 探测序列被引到 stderr（若发生）

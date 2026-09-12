@@ -7,7 +7,11 @@
   --raw         实体降为文件粒度（分页/多副本文件不合并）
   --chart       图表渲染（pie/bar/area/line），数据来自聚合维度；--metric 选指标
                 （终端+image extras 出真图，--ascii/管道/未装依赖回退字符画）
+  --schema      机器可读自描述（命令契约、字段、退出码的 JSON 版帮助）
+  --doctor      环境自检（数据源、定价表、真图能力、终端档位）
   无 --by-*     行 = 实体（会话或文件）明细
+
+帮助入口：-h / --help / /? / -? / help
 """
 
 import argparse
@@ -20,14 +24,15 @@ from datetime import datetime
 
 from rich.console import Console
 
-from . import __version__, config, stats
+from . import __version__, config, selfdoc, stats
 from .parser import collect, parse_time_arg
 from .pricing import load_pricing, model_cost
 from .render import charts, imgcharts, tables
 
 KNOWN_FLAGS = {"--since", "--until", "--by-day", "--family", "--raw", "--by-model",
                "--type", "--parent", "--session", "--model", "--archived", "--json",
-               "--chart", "--metric", "--ascii", "--version", "--help"}
+               "--chart", "--metric", "--ascii", "--schema", "--doctor",
+               "--version", "--help"}
 
 
 def _fix_single_dash(argv: list[str]) -> list[str]:
@@ -44,7 +49,11 @@ def _fix_single_dash(argv: list[str]) -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="codex-usage",
-                                 description="Codex 按会话/子代理/天/模型用量与成本（本地 rollout 解析）")
+                                 description="Codex 按会话/子代理/天/模型用量与成本（本地 rollout 解析）",
+                                 epilog=selfdoc.EPILOG,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 add_help=False)
+    ap.add_argument("-h", "--help", action="help", help="显示本帮助（/?、-?、help 等价）")
     ap.add_argument("--since",
                     help='过滤: 起始时间，支持 "2026-09-12 16:10:23" 或紧凑 "20260912-161023"、'
                          '"20260912-16"（缺省部分补 0，默认今天 00:00）')
@@ -64,7 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--model", help="过滤: 模型名子串（会话与行双重过滤）")
     ap.add_argument("--archived", action="store_true", help="过滤: 含 archived_sessions")
     ap.add_argument("--json", action="store_true", help="输出: JSON（会话级记录，含按模型明细）")
-    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    ap.add_argument("--schema", action="store_true",
+                    help="自描述: 输出机器可读契约 JSON（选项、字段、语义、退出码）")
+    ap.add_argument("--doctor", action="store_true",
+                    help="自检: 报告数据源/定价表/真图能力/终端档位（配 --json 输出结构化）")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}",
+                    help="显示版本号")
     return ap
 
 
@@ -205,8 +219,20 @@ def main():
 
 
 def _main():
-    sys.argv = [sys.argv[0]] + _fix_single_dash(sys.argv[1:])
+    argv = sys.argv[1:]
+    if argv and argv[0] in ("/?", "-?", "help"):   # Windows 风格与子命令风格帮助入口
+        argv = ["--help"]
+    sys.argv = [sys.argv[0]] + _fix_single_dash(argv)
     args = build_parser().parse_args()
+
+    if args.schema:                                # 自描述与自检先于数据扫描
+        print(json.dumps(selfdoc.schema(build_parser()), ensure_ascii=False, indent=2))
+        return
+    if args.doctor:
+        report = selfdoc.doctor()
+        print(json.dumps(report, ensure_ascii=False, indent=2) if args.json
+              else selfdoc.format_doctor(report))
+        return
     if args.chart:
         # 参数冲突先于数据扫描与依赖探测报出，避免无数据时静默通过
         if args.family:
