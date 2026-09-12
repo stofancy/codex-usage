@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-usage"
+version = "1.0.0"
+description = "Codex 本地用量统计：按会话/子代理/天/模型聚合，终端表格与图表"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "stofancy" }]
+keywords = ["codex", "openai", "usage", "terminal", "cli", "token", "cost"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Utilities",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "rich>=13.0",
+    "plotext==5.2.8",
+    "termcharts>=1.1.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/stofancy/codex-usage"
+
+[project.scripts]
+codex-usage = "codex_usage.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_usage"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
