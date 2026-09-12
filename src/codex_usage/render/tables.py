@@ -1,4 +1,9 @@
-"""终端表格视图（rich 实现：CJK 宽字符精确对齐、颜色、无 TTY 自动去色）。"""
+"""终端表格视图（rich 实现：CJK 宽字符精确对齐、颜色、无 TTY 自动去色）。
+
+布局约定：所有表格的末 7 列固定为 净输入/缓存读/输出/总 tokens/调用/单次成本/成本，
+行构造一律走 _metric_row（cells_before + 7 个数字），防止单元格数与列数错位——
+rich 对超出的单元格会静默加宽表格，导致合计行数字跑到表头之外。
+"""
 
 import sys
 
@@ -12,9 +17,6 @@ from .. import stats
 
 TYPE_STYLE = {"user": "", "subagent": "cyan", "guardian": "yellow",
               "voice": "magenta", "handoff": "blue", "agent": "green"}
-
-METRIC_LABEL = {"cost": "成本", "input": "净输入", "cache": "缓存读",
-                "output": "输出", "total": "总 tokens"}
 
 
 def console() -> Console:
@@ -38,12 +40,42 @@ def _note(rec: Session) -> str:
     return (rec.parent or "")[:13]
 
 
-def _add_total(tb: Table, label: str, net: int, cached: int, out: int, cost: float, known: bool):
-    cost_s = f"${cost:,.2f}" + ("" if known else "*")
-    tb.add_section()
-    tb.add_row(Text(label, style="bold"), "", "", "",
-               Text(f"{net:,}", style="bold"), Text(f"{cached:,}", style="bold"),
-               Text(f"{out:,}", style="bold"), Text(cost_s, style="bold"))
+def _acc() -> list:
+    """累计器 [net, cached, out, calls, cost, known]，与 aggregate_models 槽位前 6 位一致。"""
+    return [0, 0, 0, 0, 0.0, True]
+
+
+def _merge_acc(acc: list, net: int, cached: int, out: int, calls: int, cost: float, known: bool):
+    acc[0] += net; acc[1] += cached; acc[2] += out; acc[3] += calls
+    acc[4] += cost; acc[5] = acc[5] and known
+
+
+def _unit_cost_s(cost: float, calls: int, known: bool) -> str:
+    if not calls:
+        return "-"
+    u = cost / calls
+    s = f"${u:,.2f}" if u >= 1 else (f"${u:.4f}" if u >= 0.01 else f"${u:.6f}")
+    return s + ("" if known else "*")
+
+
+def _metric_row(tb: Table, cells_before: list, acc: list, style: str | None = None):
+    """数字指标行：末 7 列为 净输入/缓存读/输出/总/调用/单次成本/成本（总=净+缓存+输出）。
+
+    cells_before 为数字列之前的单元格（标签+留空），其长度 + 7 必须等于表格列数；
+    不匹配说明调用方列布局写错了（rich 会静默加宽表格导致错位），直接断言拦截。
+    """
+    assert len(tb.columns) == len(cells_before) + 7, \
+        f"列布局不匹配: 表格 {len(tb.columns)} 列 vs 前置 {len(cells_before)} + 7 数字列"
+    net, cached, out, calls, cost, known = acc
+    vals = [f"{net:,}", f"{cached:,}", f"{out:,}", f"{net + cached + out:,}",
+            f"{calls:,}", _unit_cost_s(cost, calls, known),
+            f"${cost:,.2f}" + ("" if known else "*")]
+    tb.add_row(*cells_before, *(Text(v, style=style) for v in vals))
+
+
+def _add_metric_columns(tb: Table):
+    for col in ("净输入", "缓存读", "输出", "总 tokens", "调用", "单次成本", "成本"):
+        tb.add_column(col, justify="right")
 
 
 def print_unknown_note(recs: list[Session], pricing: dict):
@@ -61,21 +93,21 @@ def view_flat(recs: list[Session], pricing: dict):
     """实体（会话/文件）明细。"""
     tb = _make_table("-")
     for col, kw in [("时间", {}), ("ID", {}), ("类型", {}), ("代理/父线程", {"overflow": "ellipsis"}),
-                    ("模型", {}), ("净输入", {"justify": "right"}), ("缓存读", {"justify": "right"}),
-                    ("输出", {"justify": "right"}), ("成本", {"justify": "right"})]:
+                    ("模型", {})]:
         tb.add_column(col, **kw)
-    acc = [0, 0, 0, 0.0, True]
+    _add_metric_columns(tb)
+    acc = _acc()
     for r in sorted(recs, key=stats.sort_key):
         d, t = stats.fmt_dt(r)
         gin, ca, out = stats.rec_tokens(r)
         cost, known = stats.rec_cost(r, pricing)
+        calls = stats.rec_calls(r)
         mm = r.primary_model + ("+mix" if r.multi_model else "")
-        tb.add_row(f"{d[5:]} {t}", r.sid[:13], _type_cell(r.type), _note(r),
-                   _model_cell(mm), f"{gin-ca:,}", f"{ca:,}", f"{out:,}",
-                   f"${cost:,.2f}" + ("" if known else "*"))
-        acc[0] += gin - ca; acc[1] += ca; acc[2] += out; acc[3] += cost
-        acc[4] = acc[4] and known
-    _add_total(tb, f"合计 {len(recs)} 会话", *acc)
+        _metric_row(tb, [f"{d[5:]} {t}", r.sid[:13], _type_cell(r.type), _note(r),
+                         _model_cell(mm)],
+                    [gin - ca, ca, out, calls, cost, known])
+        _merge_acc(acc, gin - ca, ca, out, calls, cost, known)
+    _metric_row(tb, [Text(f"合计 {len(recs)} 会话", style="bold"), "", "", "", ""], acc, style="bold")
     console().print(tb)
     print_unknown_note(recs, pricing)
 
@@ -84,17 +116,14 @@ def view_models(recs: list[Session], pricing: dict):
     """--by-model 聚合：每个模型一行。"""
     agg = stats.aggregate_models(recs, pricing)
     tb = _make_table("=")
-    for col, kw in [("模型", {}), ("会话数", {"justify": "right"}), ("净输入", {"justify": "right"}),
-                    ("缓存读", {"justify": "right"}), ("输出", {"justify": "right"}),
-                    ("成本", {"justify": "right"})]:
-        tb.add_column(col, **kw)
-    tot = [0, 0, 0, 0.0, True]
+    tb.add_column("模型")
+    tb.add_column("会话数", justify="right")
+    _add_metric_columns(tb)
+    tot = _acc()
     for mname, a in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
-        tb.add_row(_model_cell(mname), f"{a[5]}", f"{a[0]:,}", f"{a[1]:,}",
-                   f"{a[2]:,}", f"${a[3]:,.2f}" + ("" if a[4] else "*"))
-        for i in range(5):
-            tot[i] += a[i]
-    _add_total(tb, f"合计 {len(recs)} 会话", *tot)
+        _metric_row(tb, [_model_cell(mname), f"{a[6]}"], a[:6])
+        _merge_acc(tot, *a[:6])
+    _metric_row(tb, [Text(f"合计 {len(recs)} 会话", style="bold"), ""], tot, style="bold")
     console().print(tb)
     print_unknown_note(recs, pricing)
 
@@ -102,60 +131,39 @@ def view_models(recs: list[Session], pricing: dict):
 def view_by_day(recs: list[Session], pricing: dict, by_model: bool):
     """--by-day 聚合：天一行；--by-model 组合时 天×模型。"""
     tb = _make_table("=")
-    cols = [("日期", {})]
+    tb.add_column("日期")
     if by_model:
-        cols += [("模型", {}), ("会话数", {"justify": "right"})]
-    cols += [("净输入", {"justify": "right"}), ("缓存读", {"justify": "right"}),
-             ("输出", {"justify": "right"}), ("成本", {"justify": "right"})]
-    for col, kw in cols:
-        tb.add_column(col, **kw)
-    grand = [0, 0, 0, 0.0, True]
+        tb.add_column("模型")
+        tb.add_column("会话数", justify="right")
+    _add_metric_columns(tb)
+    grand = _acc()
     if by_model:
-        day_agg: dict[str, dict[str, list]] = {}
+        by_day: dict[str, list[Session]] = {}
         for r in recs:
-            d, _ = stats.fmt_dt(r)
-            da = day_agg.setdefault(d, {})
-            seen = set()
-            for mname, v in r.models.items():
-                from ..pricing import model_cost
-                c = model_cost(pricing, mname, v[0] - v[1], v[1], v[2])
-                a = da.setdefault(mname, [0, 0, 0, 0.0, True, 0])
-                a[0] += v[0] - v[1]; a[1] += v[1]; a[2] += v[2]
-                a[3] += c or 0.0
-                a[4] = a[4] and (c is not None)
-                if mname not in seen:
-                    a[5] += 1
-                    seen.add(mname)
-        for d in sorted(day_agg):
-            dtot = [0, 0, 0, 0.0, True]
-            for mname, a in sorted(day_agg[d].items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
-                tb.add_row(d, _model_cell(mname), f"{a[5]}", f"{a[0]:,}", f"{a[1]:,}",
-                           f"{a[2]:,}", f"${a[3]:,.2f}" + ("" if a[4] else "*"))
-                for i in range(5):
-                    dtot[i] += a[i]
+            by_day.setdefault(stats.fmt_dt(r)[0], []).append(r)
+        for d in sorted(by_day):
+            agg = stats.aggregate_models(by_day[d], pricing)
+            dtot = _acc()
+            for mname, a in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
+                _metric_row(tb, [d, _model_cell(mname), f"{a[6]}"], a[:6])
+                _merge_acc(dtot, *a[:6])
             tb.add_section()
-            tb.add_row(Text("小计", style="dim"), Text("当日合计", style="dim"), "",
-                       Text(f"{dtot[0]:,}", style="dim"), Text(f"{dtot[1]:,}", style="dim"),
-                       Text(f"{dtot[2]:,}", style="dim"),
-                       Text(f"${dtot[3]:,.2f}" + ("" if dtot[4] else "*"), style="dim"))
-            for i in range(5):
-                grand[i] += dtot[i]
+            _metric_row(tb, [Text("小计", style="dim"), Text("当日合计", style="dim"), ""],
+                        dtot, style="dim")
+            _merge_acc(grand, *dtot)
     else:
         day_agg: dict[str, list] = {}
         for r in recs:
             d, _ = stats.fmt_dt(r)
             gin, ca, out = stats.rec_tokens(r)
             cost, known = stats.rec_cost(r, pricing)
-            a = day_agg.setdefault(d, [0, 0, 0, 0.0, True])
-            a[0] += gin - ca; a[1] += ca; a[2] += out
-            a[3] += cost; a[4] = a[4] and known
+            _merge_acc(day_agg.setdefault(d, _acc()),
+                       gin - ca, ca, out, stats.rec_calls(r), cost, known)
         for d in sorted(day_agg):
-            a = day_agg[d]
-            tb.add_row(d, f"{a[0]:,}", f"{a[1]:,}", f"{a[2]:,}",
-                       f"${a[3]:,.2f}" + ("" if a[4] else "*"))
-            for i in range(5):
-                grand[i] += a[i]
-    _add_total(tb, f"合计 {len(recs)} 会话", *grand)
+            _metric_row(tb, [d], day_agg[d])
+            _merge_acc(grand, *day_agg[d])
+    label = Text(f"合计 {len(recs)} 会话", style="bold")
+    _metric_row(tb, [label, "", ""] if by_model else [label], grand, style="bold")
     console().print(tb)
     print_unknown_note(recs, pricing)
 
@@ -177,7 +185,7 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
             else:
                 roots.append(r)
 
-        gacc = [0, 0, 0, 0.0, True]
+        gacc = _acc()
 
         def label_row(note: str, r: Session | None, blank_id: bool = False):
             d, t = stats.fmt_dt(r) if r else ("", "")
@@ -187,28 +195,24 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
 
         def model_agg_rows(members: list[Session]) -> list:
             agg = stats.aggregate_models(members, pricing)
-            acc = [0, 0, 0, 0.0, True]
+            acc = _acc()
             for mname, a in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
-                tb.add_row("", "", "", "", _model_cell(mname), f"{a[0]:,}", f"{a[1]:,}",
-                           f"{a[2]:,}", f"${a[3]:,.2f}" + ("" if a[4] else "*"))
-                for i in range(5):
-                    acc[i] += a[i]
+                _metric_row(tb, ["", "", "", "", _model_cell(mname)], a[:6])
+                _merge_acc(acc, *a[:6])
             return acc
 
         def render_family(root: Session, children: list[Session], note_override: str | None = None):
             members = [root] + children
+            if note_override:
+                label_row(note_override, root, blank_id=True)
+            elif by_model:
+                d, t = stats.fmt_dt(root)
+                tb.add_row(f"{d[5:]} {t}", root.sid[:13], _type_cell(root.type),
+                           Text(f"{len(members)} 会话", style="bold"))
             if by_model:
-                if note_override:
-                    label_row(note_override, root, blank_id=True)
-                else:
-                    d, t = stats.fmt_dt(root)
-                    tb.add_row(f"{d[5:]} {t}", root.sid[:13], _type_cell(root.type),
-                               Text(f"{len(members)} 会话", style="bold"))
                 acc = model_agg_rows(members)
             else:
-                if note_override:
-                    label_row(note_override, root, blank_id=True)
-                acc = [0, 0, 0, 0.0, True]
+                acc = _acc()
                 rows = [(root, "")]
                 rows += [(ch, "└ " + (ch.agent or "subagent")) for ch in
                          sorted(children, key=stats.sort_key)]
@@ -217,20 +221,15 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
                     gin, ca, out = stats.rec_tokens(m)
                     cost, known = stats.rec_cost(m, pricing)
                     mm = m.primary_model + ("+mix" if m.multi_model else "")
-                    tb.add_row(f"{d[5:]} {t}", m.sid[:13], _type_cell(m.type),
-                               Text(note, style="cyan") if note else Text(_note(m)),
-                               _model_cell(mm), f"{gin-ca:,}", f"{ca:,}", f"{out:,}",
-                               f"${cost:,.2f}" + ("" if known else "*"))
-                    acc[0] += gin - ca; acc[1] += ca; acc[2] += out; acc[3] += cost
-                    acc[4] = acc[4] and known
+                    _metric_row(tb, [f"{d[5:]} {t}", m.sid[:13], _type_cell(m.type),
+                                     Text(note, style="cyan") if note else Text(_note(m)),
+                                     _model_cell(mm)],
+                                [gin - ca, ca, out, stats.rec_calls(m), cost, known])
+                    _merge_acc(acc, gin - ca, ca, out, stats.rec_calls(m), cost, known)
             if len(members) > 1:
                 tb.add_section()
-                tb.add_row(Text("家族小计", style="dim"), "", "", "",
-                           Text(f"{acc[0]:,}", style="dim"), Text(f"{acc[1]:,}", style="dim"),
-                           Text(f"{acc[2]:,}", style="dim"),
-                           Text(f"${acc[3]:,.2f}" + ("" if acc[4] else "*"), style="dim"))
-            for i in range(5):
-                gacc[i] += acc[i]
+                _metric_row(tb, [Text("家族小计", style="dim"), "", "", "", ""], acc, style="dim")
+            _merge_acc(gacc, *acc)
 
         for root in sorted(roots, key=stats.sort_key):
             children = sorted(families.get(root.sid, []), key=stats.sort_key)
@@ -244,11 +243,11 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
 
     tb = _make_table("=")
     for col, kw in [("时间", {}), ("ID", {}), ("类型", {}), ("代理/父线程", {"overflow": "ellipsis"}),
-                    ("模型", {}), ("净输入", {"justify": "right"}), ("缓存读", {"justify": "right"}),
-                    ("输出", {"justify": "right"}), ("成本", {"justify": "right"})]:
+                    ("模型", {})]:
         tb.add_column(col, **kw)
+    _add_metric_columns(tb)
 
-    grand = [0, 0, 0, 0.0, True]
+    grand = _acc()
     if by_day:
         from collections import defaultdict
         groups: dict[str, list[Session]] = defaultdict(list)
@@ -259,15 +258,11 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
             tb.add_row(Text(f"──────── {day} ────────", style="bold"), "", "", "", "", "", "", "")
             acc = emit_group(groups[day], tb)
             tb.add_section()
-            tb.add_row(Text(f"小计 {day}", style="bold"), "", "", "",
-                       Text(f"{acc[0]:,}", style="bold"), Text(f"{acc[1]:,}", style="bold"),
-                       Text(f"{acc[2]:,}", style="bold"),
-                       Text(f"${acc[3]:,.2f}" + ("" if acc[4] else "*"), style="bold"))
-            for i in range(5):
-                grand[i] += acc[i]
-        _add_total(tb, "总计", *grand)
+            _metric_row(tb, [Text(f"小计 {day}", style="bold"), "", "", "", ""], acc, style="bold")
+            _merge_acc(grand, *acc)
+        _metric_row(tb, [Text("总计", style="bold"), "", "", "", ""], grand, style="bold")
     else:
         grand = emit_group(recs, tb)
-        _add_total(tb, f"合计 {len(recs)} 会话", *grand)
+        _metric_row(tb, [Text(f"合计 {len(recs)} 会话", style="bold"), "", "", "", ""], grand, style="bold")
     console().print(tb)
     print_unknown_note(recs, pricing)

@@ -34,7 +34,7 @@ class Session:
     agent: str | None = None
     start: str | None = None
     cwd: str | None = None
-    # model -> [gross_in, cached, out, reasoning]
+    # model -> [gross_in, cached, out, reasoning, calls]
     models: dict[str, list[int]] = field(default_factory=dict)
     first_local: datetime | None = None
     last_local: datetime | None = None
@@ -57,18 +57,59 @@ def to_local(ts) -> datetime | None:
 
 
 def parse_time_arg(s: str, end: bool = False) -> datetime:
-    """'YYYY-MM-DD[ HH:MM[:SS]]' → datetime；纯日期默认 00:00 /（end=True 时）23:59:59。"""
+    """解析 --since/--until。
+
+    支持 "2026-09-12[ 16:10[:23]]"（T 可代空格）与紧凑 "20260912[-16[10[23]]]"
+    （分隔符可用 - _ 空格 . T，时间也可写 16:10[:23]）；缺省部分 since 补 0，
+    until 补满（23:59:59 / 分秒 59）。
+    """
     s = s.strip()
+    # 不用 %Y%m%d：它会把 "2026091"（7 位）宽松解析成 2026-09-01；
+    # 8 位纯日期由下面的紧凑分支严格处理
     for f in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M",
-              "%Y-%m-%dT%H:%M", "%Y-%m-%d", "%Y%m%d"):
+              "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(s, f)
-            if "%H" not in f and end:
-                dt = dt.replace(hour=23, minute=59, second=59)
+            if end:                             # 与紧凑格式一致：缺省部分补满
+                if "%S" not in f:
+                    dt = dt.replace(second=59)
+                if "%M" not in f:
+                    dt = dt.replace(minute=59)
+                if "%H" not in f:
+                    dt = dt.replace(hour=23)
             return dt
         except ValueError:
             continue
-    raise SystemExit(f"无法解析时间: {s}（支持 YYYY-MM-DD[ HH:MM[:SS]]）")
+    m = re.match(r"(\d{8})(?:[-_ T.]?(\d{2}:\d{2}(?::\d{2})?)?(\d{6}|\d{4}|\d{2})?)?$", s)
+    if m:
+        y, mo, dd = int(m.group(1)[:4]), int(m.group(1)[4:6]), int(m.group(1)[6:8])
+        h = mi = se = 0
+        if m.group(2):                      # HH[:MM[:SS]]（MM/SS 均可省略）
+            g = m.group(2)
+            h = int(g[:2])
+            mi = int(g[3:5]) if len(g) > 2 else 0
+            se = int(g[6:8]) if len(g) > 5 else 0
+            prec = 3 if len(g) > 5 else (2 if len(g) > 2 else 1)
+        elif m.group(3):                    # 紧凑 HH[MM[SS]]
+            t = m.group(3)
+            h = int(t[:2])
+            mi = int(t[2:4]) if len(t) >= 4 else 0
+            se = int(t[4:6]) if len(t) >= 6 else 0
+            prec = len(t) // 2
+        else:                               # 纯 YYYYMMDD
+            prec = 0
+        if end:
+            if prec < 3:
+                se = 59
+            if prec < 2:
+                mi = 59
+            if prec < 1:
+                h = 23
+        try:
+            return datetime(y, mo, dd, h, mi, se)
+        except ValueError:
+            pass
+    raise SystemExit(f"无法解析时间: {s}（支持 2026-09-12[ 16:10[:23]] 或 20260912[-16[10[23]]]）")
 
 
 def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) -> Session | None:
@@ -77,7 +118,7 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
     if not uuids:
         return None
     rec = Session(file=path, sid=uuids[0], uuids=uuids)
-    per_model = defaultdict(lambda: [0, 0, 0, 0])
+    per_model = defaultdict(lambda: [0, 0, 0, 0, 0])
     current_model = "unknown"
     try:
         fh = open(path, errors="replace")
@@ -128,13 +169,16 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                     l = info.get("last_token_usage")
                     if l:
                         slot = per_model[current_model]
+                        slot[4] += 1                     # 一次 API 调用（轮次）
                         slot[0] += max(0, l.get("input_tokens", 0))
                         slot[1] += max(0, l.get("cached_input_tokens", 0))
                         slot[2] += max(0, l.get("output_tokens", 0))
                         slot[3] += max(0, l.get("reasoning_output_tokens", 0))
             except (json.JSONDecodeError, AttributeError, TypeError):
                 continue
-    active = {k: v for k, v in per_model.items() if sum(v) > 0}
+    # 只保留有 token 消耗的模型槽位：calls 槽不计入，否则「无 turn_context + 零 token」
+    # 的 token_count 事件会带出一个全 0 的 unknown 模型行（旧版口径按 token 分量过滤）
+    active = {k: v for k, v in per_model.items() if sum(v[:4]) > 0}
     if not active:
         return None
     rec.models = dict(active)
@@ -173,8 +217,8 @@ def collect(sessions_dir: str, since: datetime, until: datetime,
             merged[r.sid] = r
             continue
         for mname, v in r.models.items():
-            slot = old.models.setdefault(mname, [0, 0, 0, 0])
-            for i in range(4):
+            slot = old.models.setdefault(mname, [0, 0, 0, 0, 0])
+            for i in range(5):
                 slot[i] += v[i]
         old.parent = old.parent or r.parent
         old.agent = old.agent or r.agent

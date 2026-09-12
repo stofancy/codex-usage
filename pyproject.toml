@@ -23,6 +23,13 @@ dependencies = [
     "termcharts>=1.1.2",
 ]
 
+[project.optional-dependencies]
+# 图表真图渲染：支持图形协议的终端显示 PNG，其余自动落回半块/字符画
+image = [
+    "matplotlib>=3.8",
+    "textual-image>=0.13; python_version >= '3.12'",
+]
+
 [project.urls]
 Homepage = "https://github.com/stofancy/codex-usage"
 

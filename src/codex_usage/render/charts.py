@@ -14,8 +14,8 @@ METRIC_LABEL = {"cost": "成本(USD)", "input": "净输入", "cache": "缓存读
 
 
 def metric_of(entry: list, metric: str) -> float:
-    """从聚合槽位 [net, cached, out, cost, known, nsess] 取指标值。"""
-    net, cached, out, cost = entry[0], entry[1], entry[2], entry[3]
+    """从聚合槽位 [net, cached, out, calls, cost, known, nsess] 取指标值。"""
+    net, cached, out, cost = entry[0], entry[1], entry[2], entry[4]
     return {"cost": cost, "input": net, "cache": cached,
             "output": out, "total": net + cached + out}[metric]
 

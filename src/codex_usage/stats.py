@@ -30,19 +30,24 @@ def rec_cost(rec: Session, pricing: dict) -> tuple[float, bool]:
     return total, known
 
 
+def rec_calls(rec: Session) -> int:
+    """API 调用次数（token_count 轮次）。"""
+    return sum(v[4] for v in rec.models.values())
+
+
 def aggregate_models(recs: list[Session], pricing: dict) -> dict[str, list]:
-    """聚合一组会话 → {model: [net, cached, out, cost, known, nsess]}，按会话去重计数。"""
+    """聚合一组会话 → {model: [net, cached, out, calls, cost, known, nsess]}，按会话去重计数。"""
     agg: dict[str, list] = {}
     for r in recs:
         seen = set()
         for mname, v in r.models.items():
             c = model_cost(pricing, mname, v[0] - v[1], v[1], v[2])
-            a = agg.setdefault(mname, [0, 0, 0, 0.0, True, 0])
-            a[0] += v[0] - v[1]; a[1] += v[1]; a[2] += v[2]
-            a[3] += c or 0.0
-            a[4] = a[4] and (c is not None)
+            a = agg.setdefault(mname, [0, 0, 0, 0, 0.0, True, 0])
+            a[0] += v[0] - v[1]; a[1] += v[1]; a[2] += v[2]; a[3] += v[4]
+            a[4] += c or 0.0
+            a[5] = a[5] and (c is not None)
             if mname not in seen:
-                a[5] += 1
+                a[6] += 1
                 seen.add(mname)
     return agg
 

@@ -6,24 +6,28 @@
   --family      家族结构：主线程+其子代理成树，带家族小计（可与聚合维度组合）
   --raw         实体降为文件粒度（分页/多副本文件不合并）
   --chart       图表渲染（pie/bar/area/line），数据来自聚合维度；--metric 选指标
+                （终端+image extras 出真图，--ascii/管道/未装依赖回退字符画）
   无 --by-*     行 = 实体（会话或文件）明细
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import defaultdict
 from datetime import datetime
 
+from rich.console import Console
+
 from . import __version__, config, stats
 from .parser import collect, parse_time_arg
-from .pricing import load_pricing
-from .render import charts, tables
+from .pricing import load_pricing, model_cost
+from .render import charts, imgcharts, tables
 
 KNOWN_FLAGS = {"--since", "--until", "--by-day", "--family", "--raw", "--by-model",
                "--type", "--parent", "--session", "--model", "--archived", "--json",
-               "--chart", "--metric", "--help"}
+               "--chart", "--metric", "--ascii", "--version", "--help"}
 
 
 def _fix_single_dash(argv: list[str]) -> list[str]:
@@ -41,8 +45,10 @@ def _fix_single_dash(argv: list[str]) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="codex-usage",
                                  description="Codex 按会话/子代理/天/模型用量与成本（本地 rollout 解析）")
-    ap.add_argument("--since", help='过滤: 起始时间 "YYYY-MM-DD[ HH:MM[:SS]]"（默认今天 00:00）')
-    ap.add_argument("--until", help="过滤: 结束时间（默认今天 23:59:59）")
+    ap.add_argument("--since",
+                    help='过滤: 起始时间，支持 "2026-09-12 16:10:23" 或紧凑 "20260912-161023"、'
+                         '"20260912-16"（缺省部分补 0，默认今天 00:00）')
+    ap.add_argument("--until", help="过滤: 结束时间，格式同 --since（缺省部分补满，默认今天 23:59:59）")
     ap.add_argument("--by-day", action="store_true", help="聚合: 按天")
     ap.add_argument("--by-model", action="store_true", help="聚合: 按模型")
     ap.add_argument("--family", action="store_true", help="结构: 主线程+子代理家族树，带家族小计")
@@ -51,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="图表: pie|bar|area|line（数据来自聚合维度）")
     ap.add_argument("--metric", choices=charts.METRICS, default="cost",
                     help="图表指标: cost|input|cache|output|total（默认 cost）")
+    ap.add_argument("--ascii", action="store_true", help="图表: 强制字符画（默认终端下优先真图）")
     ap.add_argument("--type", dest="typ", help="过滤: user|subagent|guardian|voice|handoff|agent")
     ap.add_argument("--parent", help="过滤: 该父线程(前缀)及其子代理")
     ap.add_argument("--session", help="过滤: 该会话(前缀)；--family 下等同 --parent")
@@ -72,38 +79,68 @@ def _emit_json(recs, pricing):
             "first_ts": r.first_local.isoformat() if r.first_local else None,
             "last_ts": r.last_local.isoformat() if r.last_local else None,
             "models": {m: {"input_gross": v[0], "cached": v[1], "output": v[2],
-                           "reasoning": v[3]} for m, v in r.models.items()},
+                           "reasoning": v[3], "calls": v[4]} for m, v in r.models.items()},
             "input_net": gin - cached, "cache_read": cached, "output": out,
+            "total_tokens": gin + out,  # 毛+输出 = 净+缓存+输出
+            "calls": stats.rec_calls(r),
             "cost_usd_known": round(cost, 4), "pricing_full": known,
             "last_cumulative_total": r.final_total,
         }, ensure_ascii=False))
 
 
 def _day_series(recs, pricing):
-    """按天聚合 → ({day: [net,cached,out,cost]}, {day: known})"""
-    agg = defaultdict(lambda: [0, 0, 0, 0.0, True])
+    """按天聚合 → {day: [net, cached, out, calls, cost, known]}（与 aggregate_models 槽位一致）"""
+    agg = defaultdict(lambda: [0, 0, 0, 0, 0.0, True])
     for r in recs:
         d, _ = stats.fmt_dt(r)
         gin, ca, out = stats.rec_tokens(r)
         cost, known = stats.rec_cost(r, pricing)
         a = agg[d]
-        a[0] += gin - ca; a[1] += ca; a[2] += out
-        a[3] += cost; a[4] = a[4] and known
+        a[0] += gin - ca; a[1] += ca; a[2] += out; a[3] += stats.rec_calls(r)
+        a[4] += cost; a[5] = a[5] and known
     return agg
 
 
+def _model_metric(mname: str, v: list, metric: str, pricing: dict) -> float:
+    """单模型原始槽 [毛输入, 缓存读, 输出, 推理, 调用] → 图表指标值。
+
+    total = 毛输入 + 输出（= 净输入 + 缓存读 + 输出）：毛输入已含缓存读，不能用 sum(v[:3])，
+    否则缓存读被计两次（实测真实数据虚高 94%）。
+    """
+    if metric == "cost":
+        return model_cost(pricing, mname, v[0] - v[1], v[1], v[2]) or 0.0
+    return {"input": v[0] - v[1], "cache": v[1], "output": v[2], "total": v[0] + v[2]}[metric]
+
+
+def _use_image(args) -> bool:
+    """终端 + 装了 image extras + 未指定 --ascii 时用真图，否则字符画。"""
+    if args.ascii or not sys.stdout.isatty():
+        return False
+    if imgcharts.available():
+        return True
+    print("提示: 未安装图片渲染依赖，图表回退字符画（装法: uv tool install "
+          "'codex-usage[image]'，需 Python ≥3.12）", file=sys.stderr)
+    return False
+
+
 def _chart(args, recs, pricing):
-    if args.family:
-        raise SystemExit("--chart 与 --family 不组合（图表按聚合维度渲染）")
+    """图表入口：优先真图（终端 + image extras），渲染失败或不可用时回退字符画。"""
+    if _use_image(args):
+        try:
+            _chart_draw(args, recs, pricing, imgcharts, lambda r: Console().print(r))
+            return
+        except Exception as e:            # 渲染问题不该让整个命令崩掉，降级到字符画
+            print(f"提示: 真图渲染失败（{type(e).__name__}: {e}），已回退字符画", file=sys.stderr)
+    _chart_draw(args, recs, pricing, charts, print)
+
+
+def _chart_draw(args, recs, pricing, render, emit):
     metric = args.metric
-    unit = "USD" if metric == "cost" else "tokens"
     title_metric = charts.METRIC_LABEL[metric]
 
     if args.chart == "pie":
-        if args.by_day:
-            raise SystemExit("饼图只按模型聚合，请去掉 --by-day")
         agg = stats.aggregate_models(recs, pricing)
-        print(charts.chart_pie(agg, metric))
+        emit(render.chart_pie(agg, metric))
         return
 
     if args.chart == "bar":
@@ -117,29 +154,22 @@ def _chart(args, recs, pricing):
                 for r in recs:
                     d, _ = stats.fmt_dt(r)
                     if m in r.models:
-                        v = r.models[m]
-                        val = {"cost": None, "input": v[0] - v[1], "cache": v[1],
-                               "output": v[2], "total": sum(v[:3])}[metric]
-                        if metric == "cost":
-                            from .pricing import model_cost
-                            val = model_cost(pricing, m, v[0] - v[1], v[1], v[2]) or 0.0
-                        per_model_day[d] += val or 0.0
+                        per_model_day[d] += _model_metric(m, r.models[m], metric, pricing)
                 series[m] = [round(per_model_day.get(d, 0), 4) for d in days]
-            print(charts.chart_bar([d[5:] for d in days], series, stacked=True,
-                                   title=f"每天{title_metric}·堆叠"))
+            emit(render.chart_bar([d[5:] for d in days], series, stacked=True,
+                                  title=f"每天{title_metric}·堆叠"))
         elif args.by_day:
             agg = _day_series(recs, pricing)
             labels = [d[5:] for d in sorted(agg)]
-            vals = [round(charts.metric_of([a[0], a[1], a[2], a[3]], metric), 4)
-                    for a in (agg[d] for d in sorted(agg))]
-            print(charts.chart_bar(labels, {title_metric: vals}, stacked=False,
-                                   title=f"每天{title_metric}"))
+            vals = [round(charts.metric_of(agg[d], metric), 4) for d in sorted(agg)]
+            emit(render.chart_bar(labels, {title_metric: vals}, stacked=False,
+                                  title=f"每天{title_metric}"))
         else:
             agg = stats.aggregate_models(recs, pricing)
             labels = sorted(agg, key=lambda m: -charts.metric_of(agg[m], metric))
             vals = [round(charts.metric_of(agg[m], metric), 4) for m in labels]
-            print(charts.chart_bar(labels, {title_metric: vals}, stacked=False,
-                                   title=f"各模型{title_metric}"))
+            emit(render.chart_bar(labels, {title_metric: vals}, stacked=False,
+                                  title=f"各模型{title_metric}"))
         return
 
     # area / line：按天趋势
@@ -154,25 +184,35 @@ def _chart(args, recs, pricing):
             for r in recs:
                 d, _ = stats.fmt_dt(r)
                 if m in r.models:
-                    v = r.models[m]
-                    from .pricing import model_cost
-                    val = (model_cost(pricing, m, v[0] - v[1], v[1], v[2]) or 0.0) if metric == "cost" \
-                        else {"input": v[0] - v[1], "cache": v[1], "output": v[2],
-                              "total": sum(v[:3])}[metric]
-                    per_model_day[d] += val
+                    per_model_day[d] += _model_metric(m, r.models[m], metric, pricing)
             series[m] = [round(per_model_day.get(d, 0), 4) for d in days]
-        print(charts.chart_series(args.chart, labels, series,
-                                  title=f"每天{title_metric}·按模型"))
+        emit(render.chart_series(args.chart, labels, series,
+                                 title=f"每天{title_metric}·按模型"))
     else:
-        vals = [round(charts.metric_of([a[0], a[1], a[2], a[3]], metric), 4)
-                for a in (agg[d] for d in days)]
-        print(charts.chart_series(args.chart, labels, {title_metric: vals},
-                                  title=f"每天{title_metric}"))
+        vals = [round(charts.metric_of(agg[d], metric), 4) for d in days]
+        emit(render.chart_series(args.chart, labels, {title_metric: vals},
+                                 title=f"每天{title_metric}"))
 
 
 def main():
+    try:
+        _main()
+    except BrokenPipeError:
+        # 管道下游提前退出（如 | head）：屏蔽退出时 flush 的二次报错，按 SIGPIPE 惯例退出
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(141)
+
+
+def _main():
     sys.argv = [sys.argv[0]] + _fix_single_dash(sys.argv[1:])
     args = build_parser().parse_args()
+    if args.chart:
+        # 参数冲突先于数据扫描与依赖探测报出，避免无数据时静默通过
+        if args.family:
+            raise SystemExit("--chart 与 --family 不组合（图表按聚合维度渲染）")
+        if args.chart == "pie" and args.by_day:
+            raise SystemExit("饼图只按模型聚合，请去掉 --by-day")
 
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     since = parse_time_arg(args.since) if args.since else today
