@@ -68,6 +68,8 @@ def test_doctor_reports_environment(env):
     assert d["data"]["sessions_dir"]["rollout_files"] > 0
     assert d["data"]["pricing_file"]["models"] == 2      # 夹具定价表 2 个模型
     assert d["render"]["tier"]
+    assert d["render"]["mode"] in ("auto", "tgp", "sixel", "halfcell", "ascii")
+    assert d["render"]["detected"]                       # 自动探测结果保留
     text = selfdoc.format_doctor(d)
     for section in ("会话数据", "归档数据", "定价表", "图表渲染", "中文字体"):
         assert section in text
@@ -83,6 +85,13 @@ def test_doctor_reports_missing_sources(monkeypatch, tmp_path):
     joined = " ".join(d["hints"])
     assert "会话目录不存在" in joined and "定价表缺失" in joined
     assert "需要注意:" in selfdoc.format_doctor(d)
+
+
+def test_schema_documents_image_mode():
+    """档位开关要能被 Agent 从 --schema 里发现。"""
+    env = selfdoc.schema(build_parser())["chart_rendering"]["env"]
+    assert "CODEX_USAGE_IMAGE_MODE" in env
+    assert "halfcell" in env["CODEX_USAGE_IMAGE_MODE"]
 
 
 def test_doctor_cli_json(env):

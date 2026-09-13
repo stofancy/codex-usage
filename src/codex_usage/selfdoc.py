@@ -54,6 +54,7 @@ EPILOG = """\
   会话      ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl   CODEX_USAGE_SESSIONS_DIR
   归档      ~/.codex/archived_sessions                     CODEX_USAGE_ARCHIVE_DIR
   定价      ~/.cc-switch/model-pricing.json                CODEX_USAGE_PRICING_FILE
+  图表档位  CODEX_USAGE_IMAGE_MODE=auto|tgp|sixel|halfcell|ascii（默认 auto 自动探测）
 """
 
 _CONVENTIONS = {
@@ -180,6 +181,10 @@ def schema(parser: argparse.ArgumentParser) -> dict:
             "tiers": ["终端支持图形协议（kitty/Sixel）→ 直接显示 PNG 真图",
                       "终端不支持图形协议 → 彩色半块字符",
                       "未装 [image] extras / 输出被管道重定向 / --ascii → plotext 字符画"],
+            "env": {"CODEX_USAGE_IMAGE_MODE": "auto|tgp|sixel|halfcell|ascii",
+                    "note": "覆盖自动探测的显示档位；ascii 等同 --ascii；"
+                            "遇到把真图渲染坏的终端可降级到 halfcell"},
+            "ascii_labels": "字符画档位下标题与图例自动转写为 ASCII（plotext 不支持宽字符会错位）",
             "install": "uv tool install \"$HOME/workspaces/codex-usage[image]\"（需 Python ≥3.12）",
         },
         "data_sources": _DATA_SOURCES,
@@ -249,6 +254,8 @@ def doctor() -> dict:
 
 
 def _tier(render: dict) -> str:
+    if render.get("mode") == "ascii":
+        return "字符画（CODEX_USAGE_IMAGE_MODE=ascii）"
     if not render["available"]:
         return "字符画（未装 [image] extras）"
     if not sys.stdout.isatty():
@@ -259,6 +266,12 @@ def _tier(render: dict) -> str:
 def format_doctor(d: dict) -> str:
     """人读版自检报告。"""
     data, render = d["data"], d["render"]
+    mode = render.get("mode", "auto")
+    detail = (f"（matplotlib {render['matplotlib']} + textual-image {render['textual_image']}，"
+              f"光栅 {render['raster_px'][0]}×{render['raster_px'][1]}"
+              + (f"，档位 {mode}，自动探测为 {render['detected']}" if mode != "auto"
+                 else f"，档位 auto（探测为 {render['detected']}）") + "）"
+              if render["available"] and render["raster_px"] else "")
     lines = [f"codex-usage {d['version']}  |  Python {d['python']}  |  {d['platform']}",
              "",
              f"会话数据   {data['sessions_dir']['path']}"
@@ -271,10 +284,7 @@ def format_doctor(d: dict) -> str:
              f"定价表     {data['pricing_file']['path']}"
              f"  {'存在' if data['pricing_file']['exists'] else '不存在'}"
              f"，{data['pricing_file']['models']} 个模型",
-             f"图表渲染   {render['tier']}"
-             + (f"（matplotlib {render['matplotlib']} + textual-image {render['textual_image']}，"
-                f"光栅 {render['raster_px'][0]}×{render['raster_px'][1]}）"
-                if render["available"] and render["raster_px"] else ""),
+             f"图表渲染   {render['tier']}{detail}",
              f"中文字体   {render['cjk_font'] or '未找到'}"]
     if d["hints"]:
         lines += ["", "需要注意:"] + [f"  - {h}" for h in d["hints"]]

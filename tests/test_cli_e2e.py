@@ -180,6 +180,27 @@ def test_chart_ascii_and_pipe_fallback(env):
     assert piped.stdout == forced.stdout
     assert "▀" not in forced.stdout          # 半块图不会出现在字符画里
     assert "▀" not in run(env, "--chart", "pie", "--ascii").stdout
+    # 字符画标签必须 ASCII 化：plotext 按 1 列=1 字符排版，中文会错位乱码
+    cjk = [ch for ch in forced.stdout if "\u3400" <= ch <= "\u9fff"]
+    assert not cjk, f"字符画里仍有中文: {''.join(cjk[:8])}"
+    assert "cost (USD)" in forced.stdout
+
+
+def test_use_image_respects_image_mode_env(monkeypatch):
+    """CODEX_USAGE_IMAGE_MODE=ascii 等同 --ascii；halfcell/tgp 仍走真图路径；非法值按 auto。"""
+    from codex_usage import cli
+    from codex_usage.render import imgcharts
+
+    args = cli.build_parser().parse_args(["--chart", "bar", "--by-model"])
+    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(imgcharts, "available", lambda: True)
+    monkeypatch.delenv("CODEX_USAGE_IMAGE_MODE", raising=False)
+    assert cli._use_image(args) is True
+    for mode, expect in (("ascii", False), ("halfcell", True), ("tgp", True), ("bogus", True)):
+        monkeypatch.setenv("CODEX_USAGE_IMAGE_MODE", mode)
+        assert cli._use_image(args) is expect, mode
+    monkeypatch.setenv("CODEX_USAGE_IMAGE_MODE", "halfcell")
+    assert cli._use_image(cli.build_parser().parse_args(["--ascii"])) is False
 
 
 def test_ascii_help_and_single_dash(env):

@@ -11,6 +11,7 @@
 
 import io
 import logging
+import os
 import shutil
 import sys
 import unicodedata
@@ -129,11 +130,38 @@ def _warn_missing_cjk() -> None:
           file=sys.stderr)
 
 
+IMAGE_MODES = ("auto", "tgp", "sixel", "halfcell", "ascii")
+
+_MODE_DISPLAY = {"tgp": "真图（kitty 图形协议）", "sixel": "真图（Sixel）",
+                 "halfcell": "彩色半块", "ascii": "字符回退"}
+
+
+def image_mode() -> str:
+    """渲染档位：auto（默认）| tgp | sixel | halfcell | ascii。
+
+    由环境变量 CODEX_USAGE_IMAGE_MODE 指定；非法值按 auto 处理。遇到把真图渲染坏的终端
+    可以一键降级（halfcell/ascii），不必整个退到 --ascii 字符画。
+    """
+    mode = os.environ.get("CODEX_USAGE_IMAGE_MODE", "auto").strip().lower()
+    return mode if mode in IMAGE_MODES else "auto"
+
+
+def image_class(renderable=None):
+    """按档位选 textual-image 的渲染类（auto 时用其自动探测结果）。"""
+    r = renderable or _renderable()
+    forced = _MODE_DISPLAY.get(image_mode())
+    if forced is None:
+        return r.Image
+    return {"真图（kitty 图形协议）": r.TGPImage, "真图（Sixel）": r.SixelImage,
+            "彩色半块": r.HalfcellImage, "字符回退": r.UnicodeImage}[forced]
+
+
 @lru_cache(maxsize=1)
 def describe() -> dict:
-    """真图渲染现状（给 --doctor / --schema 用）：依赖、终端档位、光栅尺寸、中文字体。"""
-    info: dict = {"available": available(), "matplotlib": None, "textual_image": None,
-                  "display": None, "raster_px": None, "cjk_font": None}
+    """真图渲染现状（给 --doctor / --schema 用）：依赖、档位、光栅尺寸、中文字体。"""
+    info: dict = {"available": available(), "mode": image_mode(), "matplotlib": None,
+                  "textual_image": None, "display": None, "detected": None,
+                  "raster_px": None, "cjk_font": None}
     if not info["available"]:
         return info
     import matplotlib
@@ -146,10 +174,11 @@ def describe() -> dict:
         info["textual_image"] = version("textual-image")
     except Exception:
         pass
-    info["display"] = {renderable.TGPImage: "真图（kitty 图形协议）",
-                       renderable.SixelImage: "真图（Sixel）",
-                       renderable.HalfcellImage: "彩色半块",
-                       renderable.UnicodeImage: "字符回退"}.get(renderable.Image, "未知")
+    info["detected"] = {renderable.TGPImage: "真图（kitty 图形协议）",
+                        renderable.SixelImage: "真图（Sixel）",
+                        renderable.HalfcellImage: "彩色半块",
+                        renderable.UnicodeImage: "字符回退"}.get(renderable.Image, "未知")
+    info["display"] = _MODE_DISPLAY.get(info["mode"]) or info["detected"]
     info["cjk_font"] = _cjk_font()
     try:
         info["raster_px"] = list(_target_px())
@@ -166,9 +195,10 @@ def _target_px() -> tuple[int, int]:
     try:
         from textual_image._terminal import get_cell_size
         renderable = _renderable()
-        if renderable.Image is renderable.UnicodeImage:
+        cls = image_class(renderable)
+        if cls is renderable.UnicodeImage:
             return cols, lines                # 字符回退：1 字符 = 1 像素
-        if renderable.Image is renderable.HalfcellImage:
+        if cls is renderable.HalfcellImage:
             return cols, lines * 2            # 半块：每格 1 像素宽、2 像素高
         cell_w, cell_h = get_cell_size()
         return cols * cell_w, lines * cell_h
@@ -273,7 +303,7 @@ def _render(fig):
     buf = io.BytesIO()
     fig.canvas.print_png(buf)
     buf.seek(0)
-    return _renderable().Image(buf, width="auto", height="auto")
+    return image_class()(buf, width="auto", height="auto")
 
 
 def _x_layout(labels: list[str], sz: dict) -> tuple[list[int], list[str], bool]:

@@ -127,8 +127,8 @@ def _model_metric(mname: str, v: list, metric: str, pricing: dict) -> float:
 
 
 def _use_image(args) -> bool:
-    """终端 + 装了 image extras + 未指定 --ascii 时用真图，否则字符画。"""
-    if args.ascii or not sys.stdout.isatty():
+    """终端 + 装了 image extras + 未指定 --ascii（含 CODEX_USAGE_IMAGE_MODE=ascii）时用真图。"""
+    if args.ascii or not sys.stdout.isatty() or imgcharts.image_mode() == "ascii":
         return False
     if imgcharts.available():
         return True

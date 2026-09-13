@@ -47,11 +47,94 @@ _ORIG_TARGET_PX = imgcharts._target_px
 
 @pytest.fixture(autouse=True)
 def _reset_cache():
-    """_target_px 是进程级缓存，每个用例前后清掉；并撤销用例内的替换。"""
+    """_target_px / describe 是进程级缓存，每个用例前后清掉；并撤销用例内的替换。"""
     _ORIG_TARGET_PX.cache_clear()
+    imgcharts.describe.cache_clear()
     yield
     imgcharts._target_px = _ORIG_TARGET_PX
     _ORIG_TARGET_PX.cache_clear()
+    imgcharts.describe.cache_clear()
+
+
+def test_ascii_text_rewrites_labels():
+    """字符画标签转写：plotext 按 1 列=1 字符排版，中文会错位，必须转成 ASCII。"""
+    from codex_usage.render import charts
+
+    assert charts.ascii_text("各模型成本(USD)") == "by model cost (USD)"
+    assert charts.ascii_text("每天成本(USD)·堆叠") == "per day cost (USD) [stacked]"
+    assert charts.ascii_text("成本(USD) 分布") == "cost (USD) share"
+    for label in charts.METRIC_LABEL.values():
+        assert charts.ascii_text(label).isascii() and charts.ascii_text(label)
+    for m in charts.METRICS:
+        assert charts.ascii_text(f"每天{charts.METRIC_LABEL[m]}·按模型").isascii()
+
+
+@pytest.mark.parametrize("name", ["pie", "bar", "bar-stacked", "area", "line"])
+def test_text_charts_have_no_cjk(name, monkeypatch):
+    """字符画档位：标题/图例/标签都不得含 CJK（否则 plotext 输出错位乱码）。"""
+    from codex_usage.render import charts
+
+    monkeypatch.setattr(charts.shutil, "get_terminal_size",
+                        lambda *a, **k: os.terminal_size((120, 44)))
+    build = {
+        "pie": lambda: charts.chart_pie(AGG, "cost"),
+        "bar": lambda: charts.chart_bar(LABELS, {"成本(USD)": [1.0, 2.0, 0.5, 3.0, 2.2, 1.8, 4.0]},
+                                        False, "每天成本(USD)"),
+        "bar-stacked": lambda: charts.chart_bar(LABELS, SERIES, True, "每天成本(USD)·堆叠"),
+        "area": lambda: charts.chart_series("area", LABELS, SERIES, "每天成本(USD)·按模型"),
+        "line": lambda: charts.chart_series("line", LABELS, SERIES, "每天成本(USD)·按模型"),
+    }[name]
+    out = build()
+    assert out and out.strip()
+    cjk = [ch for ch in out if "\u3400" <= ch <= "\u9fff" or "\uff00" <= ch <= "\uffef"]
+    assert not cjk, f"{name} 字符画里仍有宽字符: {''.join(cjk[:8])}"
+
+
+@pytest.mark.parametrize("mode,expect", [("tgp", "TGPImage"), ("sixel", "SixelImage"),
+                                         ("halfcell", "HalfcellImage"), ("ascii", "UnicodeImage")])
+def test_image_mode_override(monkeypatch, mode, expect):
+    """CODEX_USAGE_IMAGE_MODE 能强制渲染类（textual-image 的类都叫 Image，必须按对象身份比）。"""
+    monkeypatch.setenv("CODEX_USAGE_IMAGE_MODE", mode)
+    renderable = imgcharts._renderable()
+    assert imgcharts.image_mode() == mode
+    assert imgcharts.image_class() is getattr(renderable, expect)
+
+
+def test_image_mode_invalid_falls_back_to_auto(monkeypatch):
+    monkeypatch.setenv("CODEX_USAGE_IMAGE_MODE", "  SIXEL-please  ")
+    assert imgcharts.image_mode() == "auto"
+    monkeypatch.delenv("CODEX_USAGE_IMAGE_MODE", raising=False)
+    assert imgcharts.image_mode() == "auto"
+    assert imgcharts.image_class() is imgcharts._renderable().Image
+
+
+@pytest.mark.parametrize("mode,expect_half", [("auto", None), ("halfcell", True),
+                                              ("tgp", False), ("ascii", None)])
+def test_target_px_follows_mode(monkeypatch, mode, expect_half):
+    """光栅要跟随档位：半块 = 每格 1 像素宽 2 像素高，字符回退 = 1 字符 1 像素。"""
+    monkeypatch.setenv("CODEX_USAGE_IMAGE_MODE", mode)
+    imgcharts._target_px.cache_clear()
+    monkeypatch.setattr(imgcharts.shutil, "get_terminal_size",
+                        lambda *a, **k: os.terminal_size((120, 44)))
+    px_w, px_h = imgcharts._target_px()
+    if expect_half is True:
+        assert (px_w, px_h) == (119, 84)          # cols-1, (lines-2)*2
+    elif expect_half is False:
+        assert px_w > 200 and px_h > 100          # 图形协议：按格子像素放大
+    else:
+        assert px_h <= 44                          # 字符回退/默认：不超过行数
+
+
+def test_describe_reports_mode(monkeypatch):
+    monkeypatch.setenv("CODEX_USAGE_IMAGE_MODE", "halfcell")
+    imgcharts.describe.cache_clear()
+    d = imgcharts.describe()
+    assert d["mode"] == "halfcell"
+    assert d["display"] == "彩色半块"
+    assert d["detected"]                                    # 自动探测结果仍要保留
+    monkeypatch.delenv("CODEX_USAGE_IMAGE_MODE", raising=False)
+    imgcharts.describe.cache_clear()
+    assert imgcharts.describe()["mode"] == "auto"
 
 
 @pytest.fixture

@@ -118,6 +118,34 @@ codex-usage 1.0.0  |  Python 3.12.13  |  Linux-...
 
 出图分辨率按终端能显示的光栅尺寸定（避免把 PNG 缩放十几倍后细线被抹平），x 轴标签过多自动抽稀，轴刻度用 `120K` / `3.4B` 这类短写法。
 
+三档的实际观感（同一窗口 `--since "2026-09-12 14:10" --chart bar --by-model`）：
+
+| 档位 | 效果 |
+|---|---|
+| 真图（kitty TGP / Sixel） | ![kitty 真图](docs/shots/chart-bar-kitty.png) |
+| 彩色半块（不支持图形协议的终端） | ![半块](docs/shots/chart-bar-halfcell.png) |
+| 字符画（`--ascii`、未装 `[image]`、或输出被重定向） | ![字符画](docs/shots/chart-bar-ascii.png) |
+
+真图是 matplotlib 的原图，文字清晰；半块用两个像素挤进一个字符格，形状与配色可辨但文字偏毛糙；字符画最小、兼容性最好。字符画档位下标题与图例会自动转写成 ASCII（plotext 按 1 列 = 1 字符排版，中文这类宽字符会错位成乱码），真图与半块档位仍用中文。
+
+### 强制指定档位
+
+自动探测偶尔会失灵（例如某些终端声称支持图形协议但渲染异常），可以用环境变量覆盖：
+
+```fish
+CODEX_USAGE_IMAGE_MODE=halfcell codex-usage --chart bar --by-model   # 降级到彩色半块
+CODEX_USAGE_IMAGE_MODE=tgp      codex-usage --chart bar --by-model   # 强制 kitty 图形协议
+CODEX_USAGE_IMAGE_MODE=ascii    codex-usage --chart bar --by-model   # 等同 --ascii
+```
+
+取值 `auto`（默认，自动探测）｜`tgp`｜`sixel`｜`halfcell`｜`ascii`；非法值按 `auto` 处理。当前生效档位、自动探测结果都会由 `codex-usage --doctor` 报出，Agent 也可以从 `codex-usage --schema` 的 `chart_rendering.env` 里读到。
+
+其它视图的示例（按模型成本表格、成本占比饼图、每天成本面积图）：
+
+| 表格 | 饼图（真图） | 面积图（真图） |
+|---|---|---|
+| ![table](docs/shots/table-bymodel.png) | ![pie](docs/shots/chart-pie-kitty.png) | ![area](docs/shots/chart-area-kitty.png) |
+
 | 图型 | 数据 | 说明 |
 |---|---|---|
 | `pie` | 按模型 | 各模型占比（默认成本，可换指标） |
