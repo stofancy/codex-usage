@@ -74,7 +74,8 @@ def test_doctor_reports_environment(env):
     text = selfdoc.format_doctor(d)
     for section in ("会话数据", "归档数据", "定价", "图表渲染", "中文字体"):
         assert section in text
-    assert d["ok"] is True                               # 夹具环境下不该有告警
+    # CI 上没有中文字体，doctor 会给出字体提示：除它以外不该有告警
+    assert not [h for h in d["hints"] if "中文字体" not in h], d["hints"]
 
 
 def test_doctor_reports_missing_sources(monkeypatch, tmp_path):

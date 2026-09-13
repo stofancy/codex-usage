@@ -49,6 +49,13 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+      # Charts label axes and titles in Chinese. Without any CJK font matplotlib falls back
+      # to a narrower one and the glyphs render as boxes; the runner image has none, so
+      # install a real one here. The *no-font* path is covered on purpose by
+      # tests/test_imgcharts.py::test_charts_survive_without_cjk_font.
+      - name: Install CJK fonts for chart labels
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+
       # The built-in pricing table ships inside the package. A packaging regression here
       # would silently price everything at $0 for users without their own pricing file,
       # so build the wheel once and assert the data file is inside it.

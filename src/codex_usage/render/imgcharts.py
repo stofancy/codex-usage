@@ -318,7 +318,28 @@ def _x_layout(labels: list[str], sz: dict) -> tuple[list[int], list[str], bool]:
     step = max(1, -(-len(labels) // room))
     idx = list(range(0, len(labels), step))
     shown = [labels[i] for i in idx]
-    return idx, shown, len(shown) > 5 or max(len(x) for x in shown) > 6
+    # 水平方向放不下（每标签可用宽度 < 文本宽）时也必须斜排：否则首尾标签会水平越界。
+    # 不同系统字体宽度不同（CI 上没有中文字体时更宽），光看标签个数判断会在窄光栅上漏掉；
+    # 末位标签是居中的，它的右半宽同样要算进去，所以判定再保守一档（×0.9）。
+    avail = sz["px_w"] * 0.96 / max(1, len(shown))
+    too_wide = max(_text_w(x, sz["tick_px"]) for x in shown) > avail * 0.9
+    return idx, shown, len(shown) > 5 or max(len(x) for x in shown) > 6 or too_wide
+
+
+def _legend_or_drop(ax, fig, **kw):
+    """加图例，并**实测**它是否越出画布；越界就移除。
+
+    矮光栅（半块档的小终端）上图例放不下会把图裁掉：这时宁可没有图例
+    ——颜色顺序与轴上的系列一一对应，信息不至于丢光。估算行高在不同字体下
+    不准（CI 没有中文字体时更宽），所以这里用渲染后的包围盒判定。
+    """
+    leg = ax.legend(**kw)
+    fig.canvas.draw()
+    bb = leg.get_window_extent(fig.canvas.get_renderer())
+    fb = fig.bbox
+    if bb.x0 < fb.x0 or bb.y0 < fb.y0 or bb.x1 > fb.x1 or bb.y1 > fb.y1:
+        leg.remove()
+    return leg
 
 
 def _xticks(ax, labels: list[str], sz: dict) -> None:
@@ -326,6 +347,10 @@ def _xticks(ax, labels: list[str], sz: dict) -> None:
     idx, shown, rotate = _x_layout(labels, sz)
     ax.set_xticks(idx, shown)
     if not rotate:
+        # 水平标签是居中的：末位的右半会贴到画布边缘（实测窄光栅右溢 1px），改为右对齐即可。
+        ticks = ax.get_xticklabels()
+        if ticks:
+            ticks[-1].set_ha("right")
         return
     ax.tick_params(axis="x", labelrotation=45, rotation_mode="anchor")
     for t in ax.get_xticklabels():
@@ -358,14 +383,29 @@ def chart_pie(model_agg: dict[str, list], metric: str):
     names = list(data)
     widest = max(names, key=len)
     # 图例优先放右侧单列；右侧放不下就放画布底部多列，并按列宽截断名字——宁可字短也不让画布裁掉
-    box_w = _text_w(widest, legend_px) + 3.0 * legend_px
+    box_w = _text_w(widest, legend_px) + 4.0 * legend_px
+    draw_legend = True
     if box_w <= 0.42 * px_w:
         right, extra_bottom, ncols = max(0.5, 1 - box_w / px_w), 0.0, 0
     else:
-        right, ncols = 0.98, max(1, int(px_w * 0.96 //
+        right, ncols = 0.98, max(1, int(px_w * 0.92 //
                                       max(1.0, _text_w(widest, legend_px) + 2.5 * legend_px)))
-        names = _fit_names(names, px_w * 0.96 / ncols - 2.5 * legend_px, legend_px)
+        names = _fit_names(names, px_w * 0.92 / ncols - 2.5 * legend_px, legend_px)
         extra_bottom = -(-len(names) // ncols) * 1.6 * legend_px
+    if ncols:
+        # 矮画布（半块档的小终端）上底部图例放不下会整块越出画布：先试着多分列，
+        # 仍放不下就干脆不画图例——扇区自带百分比，信息不至于丢光。
+        rows = -(-len(names) // ncols)
+        max_rows = max(1, int(px_h * 0.55 / max(1.0, 1.6 * legend_px)))
+        if rows > max_rows:
+            per_col = max((_text_w(n, legend_px) for n in names), default=0.0) + 2.5 * legend_px
+            wider = -(-len(names) // max_rows)
+            if wider * per_col <= px_w * 0.92:
+                ncols = wider
+                names = _fit_names(names, px_w * 0.92 / ncols - 2.5 * legend_px, legend_px)
+                extra_bottom = -(-len(names) // ncols) * 1.6 * legend_px
+            else:
+                ncols, extra_bottom, draw_legend = 0, 0.0, False
     fig, ax, sz = _figure(f"{METRIC_LABEL[metric]} 分布", right=right, extra_bottom_px=extra_bottom)
     vals = list(data.values())
     colors = [_COLORS[i % len(_COLORS)] for i in range(len(names))]
@@ -377,12 +417,14 @@ def chart_pie(model_agg: dict[str, list], metric: str):
     if ncols:                                  # 底部图例用画布坐标，才能对齐画布而不是坐标轴
         fig.legend(wedges, names, loc="lower center", bbox_to_anchor=(0.5, 0.0),
                    ncols=min(ncols, len(names)), fontsize=_font_pt(legend_px, sz))
-    else:
+    elif draw_legend:
         ax.legend(wedges, names, loc="center left", bbox_to_anchor=(1.0, 0.5),
                   fontsize=_font_pt(legend_px, sz))
         fig.canvas.draw()                      # 右列图例按实测宽度回填右边距，估算不留余量会裁字
         need = ax.get_legend().get_window_extent(fig.canvas.get_renderer()).width
-        right = max(0.35, min(right, 1 - (need + 6) / (fig.get_figwidth() * _DPI)))
+        # 余量给 14px：实测宽度是首次布局的结果，图例二次排布（不同系统字体度量不同）会略宽，
+        # 只留 6px 时 CI（无中文字体）上曾右溢 1px。
+        right = max(0.35, min(right, 1 - (need + 14) / (fig.get_figwidth() * _DPI)))
         fig.subplots_adjust(left=min(fig.subplotpars.left, right - 0.15), right=right)
     ax.axis("equal")
     return _render(fig)
@@ -403,13 +445,13 @@ def chart_bar(labels: list[str], series: dict[str, list], stacked: bool, title: 
             ax.bar(x, values[i], bottom=bottom, color=_COLORS[i % len(_COLORS)],
                    width=0.62, label=name)
             bottom = [b + v for b, v in zip(bottom, values[i])]
-        ax.legend(fontsize=_font_pt(sz["tick_px"], sz))
+        _legend_or_drop(ax, fig, fontsize=_font_pt(sz["tick_px"], sz))
     else:
         step = 0.8 / len(names)
         for i, name in enumerate(names):
             ax.bar([xi - 0.4 + step * (i + 0.5) for xi in x], values[i],
                    color=_COLORS[i % len(_COLORS)], width=step, label=name)
-        ax.legend(fontsize=_font_pt(sz["tick_px"], sz))
+        _legend_or_drop(ax, fig, fontsize=_font_pt(sz["tick_px"], sz))
     _xticks(ax, labels, sz)
     return _render(fig)
 
@@ -428,5 +470,5 @@ def chart_series(kind: str, day_labels: list[str], series: dict[str, list], titl
     _xticks(ax, day_labels, sz)
     ax.margins(x=0.10)                         # 末位日期标签居中于刻度，留边避免右溢画布
     if len(series) > 1:
-        ax.legend(fontsize=_font_pt(sz["tick_px"], sz))
+        _legend_or_drop(ax, fig, fontsize=_font_pt(sz["tick_px"], sz))
     return _render(fig)

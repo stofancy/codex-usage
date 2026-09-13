@@ -282,3 +282,45 @@ def test_empty_data_returns_hint():
     assert imgcharts.chart_bar(LABELS, {}, False, "x") == "(无数据可画)"
     assert imgcharts.chart_series("line", LABELS, {}, "x") == "(无数据可画)"
     assert imgcharts.chart_pie({"m": [0, 0, 0, 0, 0.0, True, 1]}, "cost") == "(无数据可画)"
+
+
+def _edge_ink(img) -> int:
+    """画布四边上与白底不同的像素数：>0 表示内容贴到/裁到边上。"""
+    px = img.load()
+    w, h = img.size
+    return (sum(px[x, 0] != (255, 255, 255) for x in range(w))
+            + sum(px[x, h - 1] != (255, 255, 255) for x in range(w))
+            + sum(px[0, y] != (255, 255, 255) for y in range(h))
+            + sum(px[w - 1, y] != (255, 255, 255) for y in range(h)))
+
+
+def test_charts_survive_without_cjk_font(monkeypatch, png):
+    """回归（CI 首发抓到）：系统没有中文字体时回退字体更宽，饼图被裁到边上、窄光栅 x 标签右溢。
+
+    夹具本机装了 Noto CJK，所以这类问题只在 CI 上暴露；这里显式模拟"无 CJK 字体"，
+    让同一批边界断言在本地也能跑。
+    """
+    from matplotlib import rcParams
+
+    monkeypatch.setattr(imgcharts, "_cjk_font", lambda: None)
+    monkeypatch.setattr(imgcharts, "_configure", lambda: None)
+    monkeypatch.setattr(imgcharts, "_warn_missing_cjk", lambda: None)
+    rcParams["font.sans-serif"] = ["DejaVu Sans"]           # 与 CI 一致的兜底字体
+
+    for name, build in CHARTS.items():
+        assert _edge_ink(build()) == 0, f"{name}: 无中文字体时被裁到画布边上"
+
+    saved = {}
+    monkeypatch.setattr(imgcharts, "_render", lambda fig: saved.setdefault("fig", fig))
+    for px in ((110, 38), (240, 84), (1200, 700)):
+        monkeypatch.setattr(imgcharts, "_target_px", lambda px=px: px)
+        for name, build in {
+            "pie-多模型": lambda: imgcharts.chart_pie(AGG_MANY, "cost"),
+            "bar-7天": lambda: imgcharts.chart_bar(LABELS, {"成本(USD)": SERIES["sol"]},
+                                                   False, "每天成本(USD)"),
+            "bar-堆叠": lambda: imgcharts.chart_bar(LABELS, SERIES, True, "每天成本(USD)·堆叠"),
+        }.items():
+            saved.clear()
+            build()
+            bad = _overflow(saved["fig"])
+            assert not bad, f"{name} @ {px} 无中文字体: 图元越出画布 {bad[:2]}"

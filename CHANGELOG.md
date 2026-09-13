@@ -69,6 +69,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PNG and blurring thin lines), crowded x-axis labels are thinned out, and axis ticks use
   compact forms such as `120K` / `3.4B`.
 
+### Fixed
+
+- Test fixtures no longer hard-code UTC timestamps: they follow the host time zone, so the
+  suite passes on runners in any zone (it failed on every CI Python version before).
+- Real-image charts: rotated x-axis labels no longer push into the plot area, and legends
+  plus edge margins now keep all content inside the canvas on narrow rasters and on hosts
+  without a CJK font (both surfaced by the first CI run and covered by
+  `test_charts_survive_without_cjk_font`).
+
 ### Documentation
 
 - README reworked for the public release (English primary, Chinese translation alongside):
