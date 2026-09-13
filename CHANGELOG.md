@@ -18,6 +18,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--json` gained `metering` (`resets` / `fallbacks` / `delta_sum`) and `tiers` (per model ×
+  service tier, from `thread_settings_applied`) so metering decisions are auditable; `--schema`
+  documents both. `--doctor` additionally reports how much of the pricing table lacks a
+  cache-read price.
+- Cost estimation is now service-tier aware: `priority` and `fast` are one tier (the official
+  rename of priority processing) and are priced with the official per-model Fast rates — 2.0×
+  standard for Astra and the 5.6 Sol/Terra/Luna family, 2.5× for `gpt-5.5`, while `flex` is
+  0.5×. The rates come from `data/tier_pricing.json` (override with
+  `CODEX_USAGE_TIER_PRICING_FILE`) and are declared as API-equivalent USD, not the ChatGPT
+  subscription credit multipliers. Models without a public Fast price stay at the standard
+  price and report `tier_priced: false`.
+- Labels that no public source prices now go through an auditable alias table
+  (`data/model_aliases.json`, override with `CODEX_USAGE_ALIASES_FILE`): `codex-auto-review`
+  is priced as `gpt-5.5` and flagged `assumed: true`, while `gpt-reserve` is deliberately left
+  unpriced (`$0.00*`) instead of being guessed.
+
+### Fixed
+
+- Token metering now follows the cumulative `total_token_usage` delta instead of summing the
+  per-turn `last_token_usage`: 53% of session files repeat a cumulative snapshot, and some
+  subagent files start with an inherited parent-history snapshot (the largest at 14,051,760
+  tokens with a zero delta), so the old path over-counted and double-counted replayed
+  prefixes. The first snapshot is counted at its own delta, a mid-file jump larger than that
+  turn's delta is capped by it, and a cumulative drop (context compaction) or a missing
+  cumulative field falls back to `last_token_usage`.
+- Cross-day long sessions: file admission now also includes rollout files whose path date is
+  outside the window but whose mtime is at or after `--since`. Previously those turns were
+  dropped — 62,780,912 tokens and $66.75 in the fixed verification window
+  (`--since 20260911 --until 20260912`). With the fix the per-(day, model) token ledger
+  matches ccusage exactly (both 1,830,205,933 tokens, difference 0).
+- Pagination merge: a merged session now accumulates `tiers` alongside `models`, so the tier
+  totals agree with the model totals again (the previous mismatch was 4.81M gross input
+  tokens).
+- `sessions/` and `archived_sessions/` copies of the same session are now de-duplicated
+  (`sessions/` wins) instead of being summed into one session.
+- Pricing: a missing or explicitly zero `cacheReadCostPerMillion` now falls back to that
+  model's input price instead of charging cached reads at $0 (33.6% of the effective table has
+  no cache-read price).
+
+### Documentation
+
+- Both READMEs document the cumulative-delta metering rules (including the cross-day file
+  admission), the cache-read / service-tier / alias pricing behaviour, and the fixed-window
+  reconciliation with ccusage (identical tokens, +$51.40 cost because ccusage does not apply
+  the `gpt-6-astra` Fast rate).
+
 ## [0.1.0] - 2026-09-13
 
 ### Added
@@ -69,25 +117,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chart raster size now follows the terminal's reported pixel size (avoids upscaling the
   PNG and blurring thin lines), crowded x-axis labels are thinned out, and axis ticks use
   compact forms such as `120K` / `3.4B`.
-- `--json` gained `metering` (`resets` / `fallbacks` / `delta_sum`) and `tiers` (per model ×
-  service tier, from `thread_settings_applied`) so metering decisions are auditable; `--schema`
-  documents both. `--doctor` additionally reports how much of the pricing table lacks a
-  cache-read price.
 
 ### Fixed
 
-- Token metering now follows the cumulative `total_token_usage` delta instead of summing the
-  per-turn `last_token_usage`: 53% of session files repeat a cumulative snapshot, and 11
-  subagent files start with an inherited parent-history snapshot (the largest at 14,051,760
-  tokens with a zero delta), so the old path over-counted by about 2% and double-counted
-  replayed prefixes. The first snapshot is counted at its own delta, a mid-file jump larger
-  than that turn's delta is capped by it, and a cumulative drop (context compaction) or a
-  missing cumulative field falls back to `last_token_usage`.
-- `sessions/` and `archived_sessions/` copies of the same session are now de-duplicated
-  (`sessions/` wins) instead of being summed into one session.
-- Pricing: a missing or explicitly zero `cacheReadCostPerMillion` now falls back to that
-  model's input price instead of charging cached reads at $0 (33.6% of the bundled table has
-  no cache-read price).
 - Test fixtures no longer hard-code UTC timestamps: they follow the host time zone, so the
   suite passes on runners in any zone (it failed on every CI Python version before).
 - Real-image charts: rotated x-axis labels no longer push into the plot area, and legends
