@@ -53,7 +53,10 @@ def test_totals_invariant_across_aggregations(env):
         t = [0, 0, 0, 0]
         for r in rs:
             gin, ca, out = stats.rec_tokens(r)
-            t[0] += gin - ca; t[1] += ca; t[2] += out; t[3] += stats.rec_calls(r)
+            t[0] += gin - ca
+            t[1] += ca
+            t[2] += out
+            t[3] += stats.rec_calls(r)
         return t
 
     by_session = totals(recs)

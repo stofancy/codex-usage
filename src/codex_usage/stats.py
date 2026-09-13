@@ -43,7 +43,10 @@ def aggregate_models(recs: list[Session], pricing: dict) -> dict[str, list]:
         for mname, v in r.models.items():
             c = model_cost(pricing, mname, v[0] - v[1], v[1], v[2])
             a = agg.setdefault(mname, [0, 0, 0, 0, 0.0, True, 0])
-            a[0] += v[0] - v[1]; a[1] += v[1]; a[2] += v[2]; a[3] += v[4]
+            a[0] += v[0] - v[1]
+            a[1] += v[1]
+            a[2] += v[2]
+            a[3] += v[4]
             a[4] += c or 0.0
             a[5] = a[5] and (c is not None)
             if mname not in seen:

@@ -115,8 +115,12 @@ def _day_series(recs, pricing):
         gin, ca, out = stats.rec_tokens(r)
         cost, known = stats.rec_cost(r, pricing)
         a = agg[d]
-        a[0] += gin - ca; a[1] += ca; a[2] += out; a[3] += stats.rec_calls(r)
-        a[4] += cost; a[5] = a[5] and known
+        a[0] += gin - ca
+        a[1] += ca
+        a[2] += out
+        a[3] += stats.rec_calls(r)
+        a[4] += cost
+        a[5] = a[5] and known
     return agg
 
 

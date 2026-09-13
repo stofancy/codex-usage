@@ -3,13 +3,27 @@
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
-T0 = "2026-09-10T02:00:00.000Z"   # 本地 10:00 (UTC+8)
-T1 = "2026-09-10T03:30:00.000Z"   # 本地 11:30
-T2 = "2026-09-11T01:00:00.000Z"   # 本地 09:00
-T3 = "2026-09-11T06:00:00.000Z"   # 本地 14:00
+
+def utc_at(y: int, mo: int, d: int, h: int, mi: int = 0) -> str:
+    """按**本机时区**给出这些墙上时间，转成 rollout 里的 UTC 时间戳。
+
+    rollout 的 `timestamp` 是 UTC，而 `--since/--until` 与统计都按本地时区解释，
+    因此夹具不能硬编码 UTC：在 UTC 的 CI 里，硬编码会让"本地 09:00 的会话"
+    落到窗口之外，测试随运行环境时区飘红。
+    """
+    wall = datetime(y, mo, d, h, mi, tzinfo=datetime.now().astimezone().tzinfo)
+    return wall.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+T0 = utc_at(2026, 9, 10, 10, 0)    # 本地 10:00
+T1 = utc_at(2026, 9, 10, 11, 30)   # 本地 11:30
+T2 = utc_at(2026, 9, 11, 9, 0)     # 本地 09:00
+T3 = utc_at(2026, 9, 11, 14, 0)    # 本地 14:00
+ARCH = utc_at(2026, 9, 9, 8, 0)    # 归档会话：本地 09-09 08:00
 
 PRICE = {"models": [
     {"modelId": "gpt-5.6-luna", "displayName": "Luna",
@@ -102,9 +116,9 @@ def env(tmp_path, monkeypatch):
     # 归档会话
     write_rollout(str(arch), __import__("datetime").datetime(2026, 9, 9, 8, 0, 0),
                   ids["arch"], [
-        meta_event("2026-09-09T00:00:00.000Z", ids["arch"]),
-        turn_event("2026-09-09T00:00:00.000Z", "gpt-5.6-sol"),
-        token_event("2026-09-09T00:00:00.000Z", usage(550, 500, 10), usage(550, 500, 10)),
+        meta_event(ARCH, ids["arch"]),
+        turn_event(ARCH, "gpt-5.6-sol"),
+        token_event(ARCH, usage(550, 500, 10), usage(550, 500, 10)),
     ])
 
     monkeypatch.setenv("CODEX_USAGE_SESSIONS_DIR", str(sess))

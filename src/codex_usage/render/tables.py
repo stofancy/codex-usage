@@ -46,8 +46,12 @@ def _acc() -> list:
 
 
 def _merge_acc(acc: list, net: int, cached: int, out: int, calls: int, cost: float, known: bool):
-    acc[0] += net; acc[1] += cached; acc[2] += out; acc[3] += calls
-    acc[4] += cost; acc[5] = acc[5] and known
+    acc[0] += net
+    acc[1] += cached
+    acc[2] += out
+    acc[3] += calls
+    acc[4] += cost
+    acc[5] = acc[5] and known
 
 
 def _unit_cost_s(cost: float, calls: int, known: bool) -> str:
