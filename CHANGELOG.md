@@ -7,17 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Versioning notes
 
-- **Nothing has been released yet.** The first public release will be `0.1.0`
-  (the `version` field in `pyproject.toml`); the project deliberately stays in the `0.x`
-  range so that breaking changes are still allowed before `1.0.0`.
-- Everything below is therefore collected under `[Unreleased]`. At release time that
-  section is renamed to `[0.1.0] - YYYY-MM-DD` and a fresh empty `[Unreleased]` opens.
+- The first public release is `0.1.0` (2026-09-13); the project deliberately stays in the
+  `0.x` range so that breaking changes are still allowed before `1.0.0`.
+- Unreleased work goes under `[Unreleased]`; at release time that section is renamed to
+  `[X.Y.Z] - YYYY-MM-DD` and a fresh empty `[Unreleased]` opens.
 - The `--json` and `--schema` output shapes are part of the public contract: breaking
   changes there bump MAJOR (while in `0.x`, at least MINOR with a migration note).
 - Entries use the Keep a Changelog categories: Added, Changed, Deprecated, Removed,
   Fixed, Security.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-09-13
 
 ### Added
 
