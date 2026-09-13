@@ -111,6 +111,8 @@ def oracle(lines: list[str], window: tuple[datetime, datetime] | None = None) ->
     """
     per = defaultdict(lambda: [0, 0, 0, 0, 0])
     tiers: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(lambda: [0, 0, 0, 0, 0]))
+    by_day: dict[tuple[str, str], dict[str, list[int]]] = defaultdict(
+        lambda: defaultdict(lambda: [0, 0, 0, 0, 0]))
     cur_model, cur_tier = "unknown", "unknown"
     prev, delta_sum, resets, fallbacks = None, 0, 0, 0
     for raw in lines:
@@ -132,8 +134,8 @@ def oracle(lines: list[str], window: tuple[datetime, datetime] | None = None) ->
             continue
         if typ != "event_msg" or payload.get("type") != "token_count":
             continue
+        ts = _to_local(obj.get("timestamp"))
         if window is not None:
-            ts = _to_local(obj.get("timestamp"))
             if ts is None or not (window[0] <= ts <= window[1]):
                 continue
         info = payload.get("info") or {}
@@ -165,8 +167,14 @@ def oracle(lines: list[str], window: tuple[datetime, datetime] | None = None) ->
                 bucket[4] += 1
                 for i in range(4):
                     bucket[i] += max(0, delta[i])
+            if ts is not None:
+                day_slot = by_day[(ts.strftime("%Y-%m-%d"), cur_model)][cur_tier]
+                day_slot[4] += 1
+                for i in range(4):
+                    day_slot[i] += max(0, delta[i])
     active = {m: v for m, v in per.items() if sum(v[:4]) > 0}
     return {"models": active, "tiers": {m: dict(t) for m, t in tiers.items()},
+            "by_day": {k: dict(v) for k, v in by_day.items()},
             "delta_sum": delta_sum, "resets": resets, "fallbacks": fallbacks}
 
 
@@ -207,7 +215,8 @@ def test_duplicate_cumulative_event_counted_once(tmp_path):
     _assert_matches(rec, expect)
     assert rec.models["gpt-x"][:3] == [1300, 200, 130]
     assert rec.models["gpt-x"][4] == 2                 # 重复帧不算调用
-    assert rec.delta_sum == 1430                       # 旧口径对照仍保留
+    # 旧口径对照保留原语义：重复帧的 last 仍被累加（1000+100 + 1000+100 + 300+30）
+    assert rec.delta_sum == 2530
 
 
 def test_duplicate_with_stale_nonzero_last_still_counted_once(tmp_path):
@@ -386,10 +395,12 @@ def test_paginated_pages_merge_token_totals(tmp_path):
     assert recs[0].models["gpt-x"][:3] == [1700, 0, 170]
 
 
-@pytest.mark.xfail(reason="已知缺口：分页合并只累加 models，tiers/delta_sum/resets 取首页；"
-                          "详见 docs/metering-verification.md 第 4 节", strict=False)
-def test_paginated_pages_do_not_merge_tiers(tmp_path):
-    """分页会话的 tiers 与 delta_sum 也应合并（当前实现只保留第一页）。"""
+def test_paginated_pages_merge_tiers_and_delta_sum(tmp_path):
+    """分页会话的 tiers/delta_sum 也必须合并。
+
+    回归点：曾经 collect() 只累加 models，tiers 合计会比 models 少（实测少
+    4.81M 毛输入，并直接少算成本）；现在两页逐档相加。
+    """
     thread = "01a09a5f-a44e-75e1-ba40-00000000000e"
     day = tmp_path / "2026" / "09" / "11"
     bodies = [
@@ -404,7 +415,7 @@ def test_paginated_pages_do_not_merge_tiers(tmp_path):
     recs = collect(str(tmp_path), datetime(2026, 9, 11), datetime(2026, 9, 11, 23, 59, 59))
     assert len(recs) == 1
     assert recs[0].tiers["gpt-x"]["priority"][0] == 1700      # 两页都应在
-    assert recs[0].delta_sum == 1870
+    assert recs[0].delta_sum == 1870                          # 旧口径两页相加
 
 
 def test_archived_duplicate_not_double_counted(tmp_path):
@@ -422,7 +433,7 @@ def test_archived_duplicate_not_double_counted(tmp_path):
 
 
 @pytest.mark.xfail(reason="已知缺口：collect() 只扫 [since,until] 日期目录，含窗口内事件的"
-                          "早日期目录文件被漏掉；详见 docs/metering-verification.md 第 3 节",
+                          "早日期目录文件被漏掉；详见 docs/metering-verification.md 第 6.1 节",
                    strict=False)
 def test_cross_day_dir_file_with_in_window_event_is_scanned(tmp_path):
     """文件落在 09-10 目录但含 09-11 的轮次时，应被计入 09-11 窗口。"""
@@ -537,19 +548,22 @@ def _event_metering(path: str, since: datetime, until: datetime) -> dict:
                                             '"thread_settings_applied"', '"token_count"')):
                 lines.append(raw)
     got = oracle(lines, window=(since, until))
-    day = None
-    for raw in lines:
-        if '"token_count"' not in raw[:200]:
-            continue
-        try:
-            ts = _to_local(json.loads(raw).get("timestamp"))
-        except Exception:
-            continue
-        if ts and since <= ts <= until:
-            day = ts.strftime("%Y-%m-%d")
-            break
-    got["day"] = day
+    got["day"] = min((day for day, _m in got["by_day"]), default=None)
     return got
+
+
+def _tier_totals(paths, since: datetime, until: datetime, *, by_day: bool = False):
+    """独立复算一组文件 → {model: {tier: 槽}} 或 {(day,model): {tier: 槽}}。"""
+    out: dict = defaultdict(lambda: defaultdict(lambda: [0, 0, 0, 0, 0]))
+    for path in paths:
+        got = _event_metering(path, since, until)
+        source = list(got["by_day"].items()) if by_day else list(got["tiers"].items())
+        for key, ts in source:
+            for tier, slot in ts.items():
+                dest = out[key][tier]
+                for i in range(5):
+                    dest[i] += slot[i]
+    return out
 
 
 def _dirs_for(sessions: str, since: datetime, until: datetime) -> list[str]:
@@ -602,6 +616,17 @@ def _cmd_recompute(args) -> int:
         got = _event_metering(path, since, until)
         mine = got["models"]
         row = rows.get(uuids[-1]) if uuids else None
+        if args.verbose:
+            tiers = "; ".join(
+                f"{m}/{t}={s[0]}g,{s[1]}c,{s[2]}o,{s[3]}r,{s[4]}n"
+                for m, ts in sorted(got["tiers"].items()) for t, s in sorted(ts.items()))
+            print(f"  {os.path.basename(path)}")
+            for m, v in sorted(mine.items()):
+                print(f"    {m}: gross={v[0]} net={v[0] - v[1]} cached={v[1]} out={v[2]} "
+                      f"reasoning={v[3]} calls={v[4]}")
+            print(f"    delta_sum={got['delta_sum']} resets={got['resets']} "
+                  f"fallbacks={got['fallbacks']}")
+            print(f"    tiers: {tiers or '—'}")
         if not mine:
             empty += 1
             if row:
@@ -682,6 +707,96 @@ def _cmd_ledger(args) -> int:
     return 1 if bad else 0
 
 
+def _ccusage_daily_cost(repo: str, since: str, until: str) -> dict[str, float]:
+    cache = os.environ.get("npm_config_cache", os.path.join(repo, ".scratch", "npm"))
+    env = dict(os.environ, npm_config_cache=cache)
+    cmd = ["npx", "--yes", "ccusage@latest", "codex", "daily", "--json",
+           "--since", since, "--until", until]
+    res = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, env=env, timeout=900)
+    if res.returncode != 0:
+        raise SystemExit(f"ccusage 失败（{res.returncode}）:\n{res.stderr[-2000:]}")
+    return {day["date"]: day["costUSD"] for day in json.loads(res.stdout)["daily"]}
+
+
+def _cost_of_tiers(modeltiers: dict, pricing: dict, cfg) -> tuple[dict, dict, dict]:
+    """{model: {tier: 槽}} → (档位感知成本, 标准价成本, 无定价 token 数) 三个 dict。"""
+    from codex_usage.pricing import model_cost
+
+    tiered: dict[str, float] = defaultdict(float)
+    standard: dict[str, float] = defaultdict(float)
+    unpriced: dict[str, int] = defaultdict(int)
+    for model, ts in modeltiers.items():
+        for tier, slot in ts.items():
+            net = slot[0] - slot[1]
+            cost = model_cost(pricing, model, net, slot[1], slot[2], tier=tier, config_tier=cfg)
+            std = model_cost(pricing, model, net, slot[1], slot[2])
+            if cost is None:
+                unpriced[model] += net + slot[1] + slot[2]
+            else:
+                tiered[model] += cost
+            if std is not None:
+                standard[model] += std
+    return tiered, standard, unpriced
+
+
+def _cmd_cost(args) -> int:
+    """独立复算成本：逐模型/档位明细，并与 ccusage 的 costUSD 对账（含差异归因）。"""
+    from codex_usage.pricing import default_service_tier, load_pricing
+
+    since, until = args.since_dt, args.until_dt
+    paths = _all_rollouts(args.sessions_dir)
+    pricing, cfg = load_pricing(), default_service_tier()
+    per_model = {m: dict(ts) for m, ts in _tier_totals(paths, since, until).items()}
+    tiered, standard, unpriced = _cost_of_tiers(per_model, pricing, cfg)
+    print(f"窗口 {args.since} ~ {args.until}（扫描全部日期目录，含跨日目录文件）")
+    print(f"{'model':20s} {'档位感知':>12s} {'标准价':>12s} {'档位加成':>10s} {'calls':>7s} {'无价token':>12s}")
+    tot_t = tot_s = 0.0
+    for model in sorted(set(tiered) | set(standard) | set(unpriced)):
+        calls = sum(s[4] for s in per_model.get(model, {}).values())
+        markup = tiered.get(model, 0.0) - standard.get(model, 0.0)
+        tot_t += tiered.get(model, 0.0)
+        tot_s += standard.get(model, 0.0)
+        print(f"{model:20s} {tiered.get(model, 0.0):12.4f} {standard.get(model, 0.0):12.4f} "
+              f"{markup:10.4f} {calls:7d} {unpriced.get(model, 0):12,}")
+    print(f"{'TOTAL':20s} {tot_t:12.4f} {tot_s:12.4f} {tot_t - tot_s:10.4f}")
+    print("priority/fast 轮次（独立复算）：")
+    for model, ts in sorted(per_model.items()):
+        for tier in ("priority", "fast"):
+            if tier in ts:
+                print(f"    {model:20s} {tier:8s} calls={ts[tier][4]}")
+    if not args.ccusage:
+        return 0
+    per_day = _tier_totals(paths, since, until, by_day=True)
+    day_models: dict[str, dict] = defaultdict(dict)
+    for (day, model), ts in per_day.items():
+        day_models[day][model] = ts
+    cc_cost = _ccusage_daily_cost(args.repo, args.since, args.until)
+    print(f"\n{'day':11s} {'ccusage costUSD':>16s} {'我们标准价':>12s} {'我们档位感知':>13s} "
+          f"{'档位加成明细':>40s}")
+    tot_cc = 0.0
+    for day in sorted(set(day_models) | set(cc_cost)):
+        dt, ds, _ = _cost_of_tiers(day_models.get(day, {}), pricing, cfg)
+        dtt, dss = sum(dt.values()), sum(ds.values())
+        tot_cc += cc_cost.get(day, 0.0)
+        marks = {m: round(dt.get(m, 0.0) - ds.get(m, 0.0), 4) for m in dt
+                 if abs(dt.get(m, 0.0) - ds.get(m, 0.0)) > 1e-9}
+        print(f"{day:11s} {cc_cost.get(day, 0.0):16.4f} {dss:12.4f} {dtt:13.4f} {str(marks):>40s}")
+    print(f"合计：ccusage {tot_cc:.4f} | 我们标准价 {tot_s:.4f} | 我们档位感知 {tot_t:.4f}")
+    print(f"我们(档位感知) − ccusage = {tot_t - tot_cc:+.4f}；"
+          f"ccusage − 我们标准价 = {tot_cc - tot_s:+.4f}")
+    others = sum(tiered.get(m, 0.0) - standard.get(m, 0.0) for m in tiered
+                 if m != "gpt-6-astra")
+    astra = tiered.get("gpt-6-astra", 0.0) - standard.get("gpt-6-astra", 0.0)
+    print(f"分项：gpt-6-astra 档位加成 = {astra:+.4f}（ccusage 未计）；"
+          f"其它模型档位加成合计 = {others:+.4f}（ccusage 已计）")
+    print("判定：ccusage 只缺 astra 的 Fast 档加成（机制推断见 docs/metering-verification.md 第 3.4 节）")
+    return 0
+
+
+def _all_rollouts(sessions: str) -> list[str]:
+    return sorted(glob.glob(os.path.join(sessions, "*", "*", "*", "rollout-*.jsonl")))
+
+
 def _build_parser() -> argparse.ArgumentParser:
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(description="T6 计量口径独立复算（不写实现，只核验）")
@@ -690,7 +805,10 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="逐文件与 `codex-usage --json --raw` 对账")
     mode.add_argument("--ledger", action="store_true",
                       help="逐天/逐模型独立台账（可加 --ccusage）")
+    mode.add_argument("--cost", action="store_true",
+                      help="逐模型/档位成本分解（可加 --ccusage 对账 costUSD）")
     ap.add_argument("--ccusage", action="store_true", help="--ledger 时追加 ccusage 对账")
+    ap.add_argument("--verbose", action="store_true", help="--recompute 时逐文件打印明细")
     ap.add_argument("--since", default="20260911", help="默认 20260911")
     ap.add_argument("--until", default="20260912", help="默认 20260912（定窗，避免实时数据漂移）")
     ap.add_argument("--sessions-dir", default=os.path.expanduser("~/.codex/sessions"))
@@ -702,7 +820,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     args.since_dt = _parse_window(args.since, end=False)
     args.until_dt = _parse_window(args.until, end=True)
-    return _cmd_recompute(args) if args.recompute else _cmd_ledger(args)
+    if args.recompute:
+        return _cmd_recompute(args)
+    return _cmd_cost(args) if args.cost else _cmd_ledger(args)
 
 
 if __name__ == "__main__":

@@ -5,9 +5,14 @@
   A 是父线程、B 是子代理本尊；非 subagent 的同线程多文件（分页）按 ID 合并。
 - 子代理文件的 session_meta.session_id 存的是父线程 ID，不可作会话 ID。
 - input_tokens 是含缓存的毛值，净输入 = input - cached_input。
-- token 计量用每轮 token_count.last_token_usage（单轮增量）按当时 turn_context 的模型归因；
-  total_token_usage 会在上下文压缩时重置，不作总量依据，仅在记录中留作参考。
-- 时间过滤按逐轮事件时间戳（UTC→本地时间）判定，跨窗口会话只统计窗口内的轮次。
+- token 计量以每轮 token_count.total_token_usage 的**增量**为准（当前累计 − 上一累计）并按当时
+  turn_context 的模型归因：重复帧增量 0 天然不重计；首帧若整块是继承的父线程历史（last 为 0）
+  则不计；中间跳升大于该轮 last 时用 last 封顶；累计回落（上下文压缩重置）或缺累计值时回退
+  last_token_usage。last 的累加值留在 Session.delta_sum 供交叉校验。
+- 档位（Session.tiers）取自 thread_settings_applied 的 service_tier，供 priority/Fast 倍率定价。
+- 时间过滤按逐轮事件时间戳（UTC→本地时间）判定，跨窗口会话只统计窗口内的轮次；文件准入除了
+  [since,until] 覆盖的日期目录，还要补扫 mtime ≥ since 的 rollout 文件——路径日期更早但窗口内
+  仍在写轮次的长会话就在那些目录里（实测漏扫会少算约 62.8M tokens）。
 """
 
 import glob
@@ -265,6 +270,21 @@ def collect(sessions_dir: str, since: datetime, until: datetime,
     paths = []
     for day in days:
         paths += glob.glob(os.path.join(sessions_dir, day, "rollout-*.jsonl"))
+    # 跨日长会话：文件落在更早的日期目录里，但窗口内仍在写轮次（实测漏扫 3 个文件
+    # 合计 62.8M tokens，补上后与 ccusage 逐 (天,模型) 完全一致）。用 mtime ≥ since
+    # 兜住；parse_rollout 的 window 仍只统计窗口内的事件，不会多算。
+    if os.path.isdir(sessions_dir):
+        cutoff = since.timestamp()
+        for root_, _dirs, files_ in os.walk(sessions_dir):
+            for fn in files_:
+                if not (fn.startswith("rollout-") and fn.endswith(".jsonl")):
+                    continue
+                p = os.path.join(root_, fn)
+                try:
+                    if os.path.getmtime(p) >= cutoff:
+                        paths.append(p)
+                except OSError:
+                    continue
     if archive_dir:
         # sessions/ 与 archived_sessions/ 可能同时保存同一会话（文件名 UUID 相同）：
         # 以 sessions/ 为准，否则按 sid 合并会把同一份用量累加两次。
