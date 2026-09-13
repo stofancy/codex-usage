@@ -29,7 +29,13 @@ def isolated(tmp_path, monkeypatch):
     cache_dir = tmp_path / "cache"
     monkeypatch.setenv("CODEX_USAGE_PRICING_FILE", str(env_file))
     monkeypatch.setenv("CODEX_USAGE_CACHE_DIR", str(cache_dir))
-    return {"env_file": env_file, "cache_dir": cache_dir, "cache_file": cache_dir / "pricing.json"}
+    # 数据文件/配置读取都有进程内缓存：每个用例前后清掉，避免相互污染
+    caches = (pricing.load_aliases, pricing.load_tier_pricing, pricing.default_service_tier)
+    for cached in caches:
+        cached.cache_clear()
+    yield {"env_file": env_file, "cache_dir": cache_dir, "cache_file": cache_dir / "pricing.json"}
+    for cached in caches:
+        cached.cache_clear()
 
 
 def cc_switch_table(rows, updated=None):
@@ -128,11 +134,14 @@ def test_builtin_matches_channel_catalog(isolated):
         "data", "pricing.json").read_text(encoding="utf-8"))
     ids = {r["modelId"] for r in raw["models"]}
     assert "gpt-6-astra" in ids                       # models.dev 公开条目（9 个 provider）
-    assert not (ids & {"gpt-reserve", "codex-auto-review"})   # 渠道 0 条 → 记录里不会有
+    assert not (ids & {"gpt-reserve", "codex-auto-review"})   # 渠道 0 条 → 内置文件不含
     table = pricing.load_pricing()
     assert pricing.model_cost(table, "gpt-6-astra", 1000, 500, 200) > 0
-    for absent in ("gpt-reserve", "codex-auto-review"):
-        assert pricing.model_cost(table, absent, 1_000_000, 0, 0) is None
+    # codex-auto-review 走别名映射（标 assumed）；gpt-reserve 无公开价、不臆造 → 仍无价
+    detail = pricing.model_cost_detail(table, "codex-auto-review", 1_000_000, 0, 0)
+    assert detail["priced_as"] == "gpt-5.5" and detail["assumed"] is True
+    assert detail["cost_usd"] == pytest.approx(5.0)
+    assert pricing.model_cost(table, "gpt-reserve", 1_000_000, 0, 0) is None
 
 
 def test_builtin_table_never_merges_env_file_entries(isolated):
@@ -546,3 +555,214 @@ def test_tools_sync_pricing_dry_run_and_bad_input(tmp_path):
         cwd=str(ROOT), capture_output=True, text=True)
     assert proc.returncode == 2
     assert "读取定价渠道失败" in proc.stderr
+
+
+# ---------------------------------------------------------------- 别名映射
+
+
+def _write_json(path: Path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_alias_maps_assumed_label(isolated):
+    """无公开价的标签 codex-auto-review 按映射表计价，并在明细里标 assumed/priced_as。"""
+    table = {"gpt-5.5": price(5, 30, 0.5)}
+    detail = pricing.model_cost_detail(table, "codex-auto-review", 1_000_000, 0, 0)
+    assert detail["matched"] == "gpt-5.5"
+    assert detail["priced_as"] == "gpt-5.5" and detail["assumed"] is True
+    assert detail["cost_usd"] == pytest.approx(5.0)
+    assert pricing.lookup(table, "codex-auto-review")["inputCostPerMillion"] == 5
+    # 未命中映射/定价的模型仍是 None
+    assert pricing.model_cost(table, "totally-unknown", 1_000_000, 0, 0) is None
+
+
+def test_alias_target_without_price_stays_unpriced(isolated, tmp_path, monkeypatch):
+    """映射目标本身无价 → 仍返回 None（标 *），不静默算出一个价。"""
+    aliases = _write_json(tmp_path / "aliases.json", {
+        "aliases": {"mystery-model": {"model": "not-in-table", "assumed": True}}})
+    monkeypatch.setenv("CODEX_USAGE_ALIASES_FILE", str(aliases))
+    pricing.load_aliases.cache_clear()
+    table = {"gpt-5.5": price(5, 30, 0.5)}
+    assert pricing.model_cost(table, "mystery-model", 1_000_000, 0, 0) is None
+    assert pricing.model_cost_detail(table, "mystery-model", 1_000_000, 0, 0) is None
+
+
+def test_alias_file_broken_falls_back_safely(isolated, tmp_path, monkeypatch):
+    """映射文件损坏 → 空表（不崩），精确/归一化匹配照常。"""
+    broken = tmp_path / "broken-aliases.json"
+    broken.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setenv("CODEX_USAGE_ALIASES_FILE", str(broken))
+    pricing.load_aliases.cache_clear()
+    assert pricing.load_aliases() == {}
+    table = {"gpt-5.6-sol": price(4, 20, 0.4)}
+    assert pricing.model_cost(table, "gpt-5.6-sol", 1_000_000, 0, 0) == pytest.approx(4.0)
+    assert pricing.model_cost(table, "codex-auto-review", 1_000_000, 0, 0) is None
+
+
+def test_alias_does_not_override_table_entry(isolated):
+    """表里显式写了同名价（用户自定义）→ 优先于假设映射，且不标 assumed。"""
+    table = {"codex-auto-review": price(1, 2, 0.1), "gpt-5.5": price(5, 30, 0.5)}
+    detail = pricing.model_cost_detail(table, "codex-auto-review", 1_000_000, 0, 0)
+    assert detail["cost_usd"] == pytest.approx(1.0)
+    assert detail["matched"] == "codex-auto-review"
+    assert "priced_as" not in detail
+
+
+def test_alias_key_present_in_loaded_table(isolated):
+    """别名 key 注入生效：unknown_models() 不会把已计价标签误报为无价。"""
+    table = pricing.load_pricing()
+    assert "codex-auto-review" in table
+    assert "gpt-reserve" not in table            # 不映射：保持无价
+
+
+def test_aliases_info_exposes_version_and_not_mapped(isolated):
+    info = pricing.aliases_info()
+    assert info["version"]
+    assert info["aliases"]["codex-auto-review"]["model"] == "gpt-5.5"
+    assert "gpt-reserve" in info["not_mapped"]
+
+
+# ---------------------------------------------------------------- 档位（priority/Fast）价
+
+
+def test_tier_priority_uses_fast_price():
+    table = {"gpt-5.6-sol": price(4, 20, 0.4)}
+    assert pricing.model_cost(table, "gpt-5.6-sol", 1_000_000, 0, 1_000_000) == pytest.approx(24.0)
+    assert pricing.model_cost(table, "gpt-5.6-sol", 1_000_000, 0, 1_000_000,
+                              tier="priority") == pytest.approx(48.0)
+    detail = pricing.model_cost_detail(table, "gpt-5.6-sol", 0, 0, 1_000_000, tier="fast")
+    assert detail["tier"] == "priority"                  # fast ≡ priority
+    assert detail["tier_priced"] is True
+    assert detail["tier_confidence"] == "official"
+    assert detail["standard_cost_usd"] == pytest.approx(20.0)
+
+
+def test_tier_multiplier_is_per_model_not_blanket():
+    """5.5 是官方 2.5×，不能统一按 2× 少算。"""
+    table = {"gpt-5.5": price(5, 30, 0.5), "gpt-6-astra": price(10, 50, 1)}
+    assert pricing.tier_multiplier(table, "gpt-5.5", "priority") == pytest.approx(2.5)
+    assert pricing.tier_multiplier(table, "gpt-6-astra", "priority") == pytest.approx(2.0)
+    assert pricing.model_cost(table, "gpt-5.5", 1_000_000, 0, 0,
+                              tier="priority") == pytest.approx(12.5)
+
+
+def test_tier_unknown_or_unpriced_falls_back_to_standard():
+    table = {"gpt-5-codex": price(1.25, 10, 0.125), "gpt-5.6-sol": price(4, 20, 0.4),
+             "gpt-5.5": price(5, 30, 0.5)}
+    weird = pricing.model_cost_detail(table, "gpt-5.6-sol", 1_000_000, 0, 0, tier="weird-tier")
+    assert weird["tier"] == "standard" and weird["cost_usd"] == pytest.approx(4.0)
+    # 官方没有 Fast 行的模型：保持标准价并标 tier_priced=False
+    noprice = pricing.model_cost_detail(table, "gpt-5-codex", 1_000_000, 0, 0, tier="priority")
+    assert noprice["tier_priced"] is False and noprice["cost_usd"] == pytest.approx(1.25)
+    # 别名映射后按目标模型取档位价（codex-auto-review → gpt-5.5 的 2.5×）
+    assert pricing.model_cost(table, "codex-auto-review", 1_000_000, 0, 0,
+                              tier="priority") == pytest.approx(12.5)
+
+
+def test_tier_flex_is_half_of_standard():
+    table = {"gpt-5.6-luna": price(0.2, 1.2, 0.02)}
+    standard = pricing.model_cost(table, "gpt-5.6-luna", 1_000_000, 0, 1_000_000)
+    flex = pricing.model_cost(table, "gpt-5.6-luna", 1_000_000, 0, 1_000_000, tier="flex")
+    assert flex == pytest.approx(standard / 2)
+    assert pricing.model_cost_detail(table, "gpt-5.6-luna", 0, 0, 1_000_000,
+                                     tier="flex")["tier"] == "flex"
+
+
+def test_tier_unknown_uses_config_toml(isolated, tmp_path, monkeypatch):
+    config = tmp_path / "config.toml"
+    config.write_text('model = "gpt-5.6-sol"\nservice_tier = "priority"\n', encoding="utf-8")
+    monkeypatch.setenv("CODEX_USAGE_CODEX_CONFIG", str(config))
+    pricing.default_service_tier.cache_clear()
+    assert pricing.default_service_tier() == "priority"
+    assert pricing.resolve_tier("unknown") == "priority"
+    assert pricing.resolve_tier(None) == "priority"
+    assert pricing.resolve_tier("unknown", config_tier="standard") == "standard"
+    assert pricing.resolve_tier("fast") == "priority"
+
+    monkeypatch.setenv("CODEX_USAGE_CODEX_CONFIG", str(tmp_path / "missing.toml"))
+    pricing.default_service_tier.cache_clear()
+    assert pricing.default_service_tier() == "default"
+    assert pricing.resolve_tier("unknown") == "standard"
+
+
+def test_tier_data_file_broken_falls_back_to_standard(isolated, tmp_path, monkeypatch):
+    broken = tmp_path / "tiers.json"
+    broken.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("CODEX_USAGE_TIER_PRICING_FILE", str(broken))
+    pricing.load_tier_pricing.cache_clear()
+    data = pricing.load_tier_pricing()
+    assert data["priority"] == {} and data["multipliers"] == {}
+    table = {"gpt-5.6-sol": price(4, 20, 0.4)}
+    detail = pricing.model_cost_detail(table, "gpt-5.6-sol", 1_000_000, 0, 0, tier="priority")
+    assert detail["tier_priced"] is False and detail["cost_usd"] == pytest.approx(4.0)
+
+
+def test_builtin_tier_table_matches_official_rates(isolated):
+    """内置档位表与官方 Fast 表一致：5.5 = 2.5×，5.6 系/Astra/5.4 = 2×。"""
+    multipliers = pricing.load_tier_pricing()["multipliers"]
+    assert multipliers["gpt-5.5"] == pytest.approx(2.5)
+    for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-5.4"):
+        assert multipliers[model] == pytest.approx(2.0)
+    table = pricing.load_pricing()
+    # 5.5 priority: 12.5 in + 75 out，而不是“统一 2×”的 10 + 60
+    assert pricing.model_cost(table, "gpt-5.5", 1_000_000, 0, 1_000_000,
+                              tier="priority") == pytest.approx(87.5)
+
+
+def test_tier_records_from_litellm_parses_confidence_and_multipliers():
+    raw = {
+        "gpt-5.6-sol": {"input_cost_per_token": 4e-6, "output_cost_per_token": 2e-5,
+                        "cache_read_input_token_cost": 4e-7,
+                        "input_cost_per_token_priority": 8e-6,
+                        "output_cost_per_token_priority": 4e-5,
+                        "cache_read_input_token_cost_priority": 8e-7},
+        "gpt-5.3-codex": {"input_cost_per_token": 1.75e-6, "output_cost_per_token": 1.4e-5,
+                          "input_cost_per_token_priority": 3.5e-6,
+                          "output_cost_per_token_priority": 2.8e-5},
+        "meta/some-model": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6,
+                            "input_cost_per_token_priority": 2e-6,
+                            "output_cost_per_token_priority": 4e-6},
+        "gpt-5-codex": {"input_cost_per_token": 1.25e-6, "output_cost_per_token": 1e-5},
+    }
+    rows = pricing.tier_records_from_litellm(raw)
+    priority = {r["modelId"]: r for r in rows["priority"]}
+    assert set(priority) == {"gpt-5.6-sol", "gpt-5.3-codex"}      # 带 provider 前缀的不收
+    assert priority["gpt-5.6-sol"]["confidence"] == "official"
+    assert priority["gpt-5.6-sol"]["inputCostPerMillion"] == pytest.approx(8.0)
+    assert priority["gpt-5.3-codex"]["confidence"] == "litellm"   # 官方无 Fast 行 → 低置信
+    assert rows["multipliers"]["gpt-5.6-sol"] == pytest.approx(2.0)
+    assert "gpt-5-codex" not in rows["multipliers"]                # 无 priority 价
+
+
+def test_cost_for_tiered_matches_whole_model_cost(isolated, tmp_path, monkeypatch):
+    """T6 不变式交叉校验：tiers 逐分量求和 == models 时，分档计价与整块计价一致。"""
+    monkeypatch.setenv("CODEX_USAGE_CODEX_CONFIG", str(tmp_path / "missing.toml"))
+    pricing.default_service_tier.cache_clear()
+    table = {"gpt-5.6-sol": price(4, 20, 0.4), "gpt-6-astra": price(10, 50, 1)}
+    models = {"gpt-5.6-sol": [1_000_000, 2_000_000, 500_000, 0, 3],
+              "gpt-6-astra": [3_000_000, 1_000_000, 200_000, 0, 2]}
+    tiers = {
+        "gpt-5.6-sol": {"default": [600_000, 1_200_000, 300_000, 0, 2],
+                        "unknown": [400_000, 800_000, 200_000, 0, 1]},
+        "gpt-6-astra": {"default": [3_000_000, 1_000_000, 200_000, 0, 2]},
+    }
+    for model, slots in tiers.items():                    # 逐档求和 == 整块（T6 保证）
+        for i in range(3):
+            assert sum(slot[i] for slot in slots.values()) == models[model][i]
+    summary = pricing.cost_for_tiered(tiers, table)
+    assert summary["all_priced"] is True
+    whole = sum(pricing.model_cost(table, m, v[0] - v[1], v[1], v[2])
+                for m, v in models.items())
+    assert summary["cost_usd"] == pytest.approx(whole)
+
+
+def test_cost_for_tiered_adds_priority_premium():
+    table = {"gpt-5.6-sol": price(4, 20, 0.4)}
+    summary = pricing.cost_for_tiered({
+        "gpt-5.6-sol": {"default": [1_000_000, 0, 0, 0, 1],
+                        "priority": [1_000_000, 0, 0, 0, 1]}}, table)
+    assert summary["cost_usd"] == pytest.approx(4.0 + 8.0)
+    assert summary["models"]["gpt-5.6-sol"]["tiers"]["priority"]["tier"] == "priority"
+    assert summary["models"]["gpt-5.6-sol"]["tiers"]["default"]["cost_usd"] == pytest.approx(4.0)

@@ -87,6 +87,24 @@ _PROVIDER_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9_.+-]*/")
 #: 版本日期后缀：2025-11-13 / 20251113（分隔符可混用）
 _DATE_SUFFIX_RE = re.compile(r"[-_.](?:20\d{2})[-_.]?(?:0[1-9]|1[0-2])[-_.]?(?:0[1-9]|[12]\d|3[01])$")
 _LATEST_SUFFIX_RE = re.compile(r"[-_.](?:latest|preview|stable)$")
+
+# ---- 档位（service tier）与别名映射 ------------------------------------------
+
+TIER_STANDARD = "standard"
+TIER_PRIORITY = "priority"
+TIER_FLEX = "flex"
+#: 官方 2026-07-30 把 priority processing 改名为 Fast：`fast` 与 `priority` 同档。
+_TIER_ALIASES = {"fast": TIER_PRIORITY, "priority": TIER_PRIORITY, "flex": TIER_FLEX,
+                 "default": TIER_STANDARD, "standard": TIER_STANDARD, "": TIER_STANDARD}
+#: 档位数据里标为 official 的模型（OpenAI 官方 Fast/Flex 价目表有独立行）。
+OFFICIAL_TIER_MODELS = frozenset({
+    "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+    "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2", "gpt-5.1", "gpt-5",
+})
+#: 数据文件覆盖用的环境变量（未设置时读包内 data/ 资源）。
+ALIASES_FILE_ENV = "CODEX_USAGE_ALIASES_FILE"
+TIER_PRICING_FILE_ENV = "CODEX_USAGE_TIER_PRICING_FILE"
+CODEX_CONFIG_ENV = "CODEX_USAGE_CODEX_CONFIG"
 #: 少量常见别名（归一化后仍需纠正的写法）。
 _ALIASES = {
     "claude-3.5-sonnet": "claude-3-5-sonnet",
@@ -136,14 +154,12 @@ def _prefix_lookup(pricing: dict, normalized: str) -> str | None:
     return best
 
 
-def _lookup_hit(pricing: dict[str, dict], model: str) -> tuple[str, dict] | None:
-    """按 精确 → 归一化 → 前缀 三档查找 → (命中的表 key, 价格记录)；找不到返回 None。"""
-    if not pricing or not model:
-        return None
-    hit = pricing.get(model)
+def _lookup_direct(pricing: dict, name: str) -> tuple[str, dict] | None:
+    """精确 → 归一化 → 前缀（不查别名映射，避免映射链成环）。"""
+    hit = pricing.get(name)
     if hit is not None:
-        return model, hit
-    n = normalize_model(model)
+        return name, hit
+    n = normalize_model(name)
     if not n:
         return None
     hit = pricing.get(n)
@@ -153,8 +169,56 @@ def _lookup_hit(pricing: dict[str, dict], model: str) -> tuple[str, dict] | None
     return (key, pricing[key]) if key else None
 
 
+def _alias_spec(model: str, normalized: str | None) -> dict | None:
+    """查别名映射规则（原始名优先，其次归一化名）；无规则/表为空返回 None。"""
+    aliases = load_aliases()
+    if not aliases:
+        return None
+    return aliases.get(model.strip().lower()) or (aliases.get(normalized) if normalized else None)
+
+
+def _lookup_hit(pricing: dict[str, dict], model: str) -> tuple[str, dict, dict | None] | None:
+    """按 精确 → 归一化 → **别名映射** → 前缀 查找 → (表 key, 价格记录, 别名规则|None)。
+
+    表内**真实**的 ``codex-auto-review`` 记录优先；``_with_aliases`` 注入的映射副本带
+    ``_alias_of`` 标记，会转成别名路径，从而保留 ``priced_as`` / ``assumed`` 与档位映射。
+    """
+    if not pricing or not model:
+        return None
+    n = normalize_model(model)
+    spec = _alias_spec(model, n)
+
+    def via_alias(target: str):
+        thit = _lookup_direct(pricing, target)
+        if thit is None:
+            return None
+        return thit[0], thit[1], spec or {"model": target, "assumed": True}
+
+    hit = pricing.get(model)
+    if hit is not None:
+        injected = hit.get("_alias_of") if isinstance(hit, dict) else None
+        if injected and spec:
+            return via_alias(str(injected)) or (model, hit, None)
+        return model, hit, None
+    if n:
+        hit = pricing.get(n)
+        if hit is not None:
+            injected = hit.get("_alias_of") if isinstance(hit, dict) else None
+            if injected and spec:
+                return via_alias(str(injected)) or (n, hit, None)
+            return n, hit, None
+    if spec:
+        got = via_alias(str(spec.get("model") or ""))
+        if got is not None:
+            return got
+    if not n:
+        return None
+    key = _prefix_lookup(pricing, n)
+    return (key, pricing[key], None) if key else None
+
+
 def lookup(pricing: dict[str, dict], model: str) -> dict | None:
-    """按 精确 → 归一化 → 前缀 三档查找价格记录；找不到返回 None。"""
+    """按 精确 → 归一化 → 别名映射 → 前缀 查找价格记录；找不到返回 None。"""
     hit = _lookup_hit(pricing, model)
     return hit[1] if hit else None
 
@@ -232,13 +296,146 @@ def _read_pricing(path: str, *, builtin: bool = False) -> tuple[dict[str, dict],
         return {}, meta
 
 
+def _data_traversable(filename: str):
+    """包内 data/ 资源（importlib.resources，兼容 zip 安装）。"""
+    from importlib.resources import files
+    return files("codex_usage").joinpath("data", filename)
+
+
+def _read_data_file(filename: str, env_var: str):
+    """读 data/ 下的 JSON（env_var 可覆盖路径）；缺失/损坏返回 None，绝不抛异常。"""
+    path = os.environ.get(env_var)
+    try:
+        if path:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        return json.loads(_data_traversable(filename).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=1)
+def load_aliases() -> dict[str, dict]:
+    """别名映射表 ``data/model_aliases.json``（``CODEX_USAGE_ALIASES_FILE`` 可覆盖）。
+
+    形如 ``{"codex-auto-review": {"model": "gpt-5.5", "assumed": true, "note": ...}}``；
+    文件缺失/损坏/结构不识别时返回空表（安全回退，不影响精确/归一化/前缀匹配）。
+    """
+    raw = _read_data_file("model_aliases.json", ALIASES_FILE_ENV)
+    table = raw.get("aliases") if isinstance(raw, dict) else None
+    if not isinstance(table, dict):
+        table = raw if isinstance(raw, dict) else {}
+    out: dict[str, dict] = {}
+    for src, spec in table.items():
+        if not isinstance(src, str):
+            continue
+        if isinstance(spec, str):
+            out[src.lower()] = {"model": spec, "assumed": True}
+        elif isinstance(spec, dict) and spec.get("model"):
+            out[src.lower()] = dict(spec)
+    return out
+
+
+def aliases_info() -> dict:
+    """别名表元信息（供 ``--schema``/doctor 展示版本与依据）。"""
+    raw = _read_data_file("model_aliases.json", ALIASES_FILE_ENV)
+    if not isinstance(raw, dict):
+        return {"version": None, "aliases": {}, "not_mapped": {}}
+    table = raw.get("aliases") if isinstance(raw.get("aliases"), dict) else {}
+    return {"version": raw.get("version"), "updated": raw.get("updated"),
+            "aliases": table, "not_mapped": raw.get("not_mapped") or {}}
+
+
+@lru_cache(maxsize=1)
+def load_tier_pricing() -> dict:
+    """档位价表 ``data/tier_pricing.json``（``CODEX_USAGE_TIER_PRICING_FILE`` 可覆盖）。
+
+    返回 ``{"priority": {modelId: 记录}, "flex": {...}, "multipliers": {modelId: float},
+    "updated": ..., "source": ...}``；文件缺失/损坏时各表为空（一切按标准价）。
+    """
+    raw = _read_data_file("tier_pricing.json", TIER_PRICING_FILE_ENV)
+    out: dict = {"priority": {}, "flex": {}, "multipliers": {}, "updated": None, "source": None}
+    if not isinstance(raw, dict):
+        return out
+    for tier in ("priority", "flex"):
+        rows = raw.get(tier)
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict) and row.get("modelId"):
+                    out[tier][str(row["modelId"]).lower()] = row
+    mult = raw.get("multipliers")
+    if isinstance(mult, dict):
+        out["multipliers"] = {str(k).lower(): float(v) for k, v in mult.items()
+                              if isinstance(v, (int, float)) and not isinstance(v, bool)}
+    out["updated"] = raw.get("updated")
+    out["source"] = raw.get("source")
+    return out
+
+
+def _parse_service_tier(text: str) -> str | None:
+    """从 config.toml 文本里取顶层 ``service_tier``（优先 tomllib，回退正则）。"""
+    try:
+        import tomllib                                  # Python ≥3.11
+        value = tomllib.loads(text).get("service_tier")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    except Exception:
+        pass
+    match = re.search(r'^\s*service_tier\s*=\s*["\']([^"\']+)["\']', text, re.M)
+    return match.group(1).strip() if match else None
+
+
+@lru_cache(maxsize=1)
+def default_service_tier() -> str:
+    """``~/.codex/config.toml`` 的 ``service_tier``（``CODEX_USAGE_CODEX_CONFIG`` 可覆盖）。
+
+    ``Session.tiers`` 里的 ``unknown`` 档用它兜底；读不到/损坏返回 ``"default"``（标准价）。
+    进程内缓存一次（改配置后重启进程生效）。
+    """
+    path = os.environ.get(CODEX_CONFIG_ENV) or os.path.join(
+        os.path.expanduser("~"), ".codex", "config.toml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return "default"
+    value = _parse_service_tier(text)
+    return value or "default"
+
+
+def resolve_tier(tier: str | None, *, config_tier: str | None = None) -> str:
+    """档位归一 → ``standard`` | ``priority`` | ``flex``。
+
+    ``fast``/``priority`` → priority（官方改名同档）；``flex`` → flex；
+    ``default``/``standard`` → standard；``None``/``unknown``/空 → ``config_tier``，
+    再退回 ``~/.codex/config.toml`` 的 service_tier（本机 default）；其它未知值 → standard。
+    """
+    raw = (tier or "").strip().lower()
+    if raw in ("", "unknown", "none"):
+        raw = (config_tier or "").strip().lower() or default_service_tier().strip().lower()
+    return _TIER_ALIASES.get(raw, TIER_STANDARD)
+
+
 def _with_aliases(table: dict[str, dict]) -> dict[str, dict]:
-    """把每个 modelId 的归一化形式也作为别名 key 注入，让 ``m in pricing`` 判定一致。"""
+    """注入归一化 key 与别名映射 key，让 ``m in pricing`` / ``len`` 与可计价集合一致。
+
+    - 每个 modelId 的归一化形式（``GPT-5.1-Codex`` → ``gpt-5.1-codex``）；
+    - ``data/model_aliases.json`` 里映射到的目标（``codex-auto-review`` → ``gpt-5.5`` 的记录副本），
+      这样 ``unknown_models()`` 不会把已计价标签误报为无价。
+    """
     out = dict(table)
     for key, value in table.items():
         alias = normalize_model(key)
         if alias and alias not in out:
             out[alias] = value
+    for src, spec in load_aliases().items():
+        if src in out:
+            continue
+        target = str(spec.get("model") or "")
+        if target and target in out:
+            copy = dict(out[target])                 # 副本：不与目标记录共享可变对象
+            copy["_alias_of"] = target               # 标记来源，供 lookup 转别名路径
+            out[src] = copy
     return out
 
 
@@ -308,28 +505,11 @@ def load_pricing(path: str | None = None) -> dict[str, dict]:
     return _resolve(path)[0]
 
 
-def model_cost_detail(pricing: dict[str, dict], model: str,
-                      net_in: int, cached: int, out: int) -> dict | None:
-    """`model_cost` 的明细版：成本 + 命中的定价 key + 本行用到的价格回退。
-
-    返回 ``{"model", "matched", "cost_usd", "fallbacks"}``；无定价返回 None。
-
-    ``fallbacks`` 是回退字段名列表（空列表 = 完全按表内价格）：
-
-    - ``"cacheReadCostPerMillion"``：表里**没有** cache read 价**或显式为 0** 时，
-      缓存读按 input 价计（保守上界，宁多算不少算；ccusage 同口径）。缓存读为 0
-      tokens 时也会标记，便于诊断“这一行用了回退”，但此时不影响金额。
-    - input 价缺失/非法/为负 → 整行视为无定价，返回 None（与 ``model_cost`` 一致）。
-    - output 价缺失/非法/为负 → 按 0 计；``net_in``/``cached``/``out`` 为负按 0 计，
-      因此成本永不为负。
-    """
-    hit = _lookup_hit(pricing, model)
-    if hit is None:
-        return None
-    key, record = hit
+def _cost_from_record(record: dict, net_in: int, cached: int, out: int) -> tuple[float | None, list[str]]:
+    """按一条价格记录算成本 → (cost, fallbacks)；缺 input 价 → (None, [])。"""
     input_price = _as_price(record.get("inputCostPerMillion"))
     if input_price is None:                      # 缺 input 价 = 无定价
-        return None
+        return None, []
     fallbacks: list[str] = []
     cache_price = _as_price(record.get("cacheReadCostPerMillion"))
     if not cache_price:                          # None 或 0 → 回退 input 价
@@ -339,16 +519,150 @@ def model_cost_detail(pricing: dict[str, dict], model: str,
     cost = (max(0, net_in) * input_price
             + max(0, cached) * cache_price
             + max(0, out) * output_price) / 1e6
-    return {"model": model, "matched": key, "cost_usd": cost, "fallbacks": fallbacks}
+    return cost, fallbacks
 
 
-def model_cost(pricing: dict[str, dict], model: str, net_in: int, cached: int, out: int) -> float | None:
+def _scaled_record(record: dict, multiplier: float) -> dict:
+    """按倍率缩放一条价格记录（档位价表缺该模型时用官方倍率兜底）。"""
+    factor = max(0.0, float(multiplier))
+
+    def scaled(key: str):
+        raw = _as_price(record.get(key))
+        return None if raw is None else round(raw * factor, 12)
+
+    return {"modelId": record.get("modelId"),
+            "inputCostPerMillion": scaled("inputCostPerMillion"),
+            "cacheReadCostPerMillion": scaled("cacheReadCostPerMillion"),
+            "outputCostPerMillion": scaled("outputCostPerMillion")}
+
+
+def tier_multiplier(pricing: dict[str, dict], model: str, tier: str | None = None,
+                    *, config_tier: str | None = None) -> float | None:
+    """该模型在目标档位的倍率（standard = 1.0）；无公开档位价返回 None。
+
+    优先用逐模型档位价（``data/tier_pricing.json``），否则回退官方倍率表。
+    """
+    effective = resolve_tier(tier, config_tier=config_tier)
+    if effective == TIER_STANDARD:
+        return 1.0
+    hit = _lookup_hit(pricing, model)
+    if hit is None:
+        return None
+    key, record, _alias = hit
+    data = load_tier_pricing()
+    tier_record = data.get(effective, {}).get(key.strip().lower())
+    if tier_record:
+        base = _as_price(record.get("inputCostPerMillion"))
+        priced = _as_price(tier_record.get("inputCostPerMillion"))
+        if base and priced:
+            return round(priced / base, 4)
+    return data["multipliers"].get(key.strip().lower())
+
+
+def model_cost_detail(pricing: dict[str, dict], model: str, net_in: int, cached: int, out: int,
+                      *, tier: str | None = None, config_tier: str | None = None) -> dict | None:
+    """`model_cost` 的明细版：成本 + 命中的定价 key + 档位/别名/回退诊断。
+
+    返回 ``{"model", "matched", "cost_usd", "fallbacks", "standard_cost_usd", "tier",
+    "tier_priced"}``，别名命中时另有 ``priced_as`` / ``assumed``，用逐模型档位价时
+    另有 ``tier_confidence``（``official`` / ``litellm`` / ``multiplier``）；无定价返回 None。
+
+    - **档位**（``tier``）：``priority``/``fast`` 用 Fast 档价；``flex`` 用 Flex 档价；
+      ``standard``/``default``/未知/``None`` 一律标准价（``None`` 先按
+      ``config_tier`` → ``~/.codex/config.toml`` 的 service_tier → ``default``）。
+      该模型没有公开档位价时退回标准价并把 ``tier_priced`` 置 False。
+    - **别名**：``codex-auto-review`` 等无公开价的标签按 ``data/model_aliases.json``
+      映射到目标模型并标 ``assumed: True``；映射目标本身无价则仍返回 None（标 ``*``）。
+    - **回退**：表里没有 cache read 价或显式为 0 → 缓存读按 input 价计（保守上界），
+      记入 ``fallbacks``；input 价缺失/非法/为负 → 整行无定价返回 None；负 token 分量按 0。
+    """
+    hit = _lookup_hit(pricing, model)
+    if hit is None:
+        return None
+    key, record, alias = hit
+    standard_cost, fallbacks = _cost_from_record(record, net_in, cached, out)
+    if standard_cost is None:                    # 缺 input 价 = 无定价
+        return None
+
+    effective = resolve_tier(tier, config_tier=config_tier)
+    cost, cost_fallbacks = standard_cost, fallbacks
+    tier_priced, tier_confidence = False, None
+    if effective != TIER_STANDARD:
+        data = load_tier_pricing()
+        tkey = key.strip().lower()
+        tier_record = data.get(effective, {}).get(tkey)
+        if tier_record:
+            priced, priced_fallbacks = _cost_from_record(tier_record, net_in, cached, out)
+            if priced is not None:
+                cost, cost_fallbacks = priced, priced_fallbacks
+                tier_priced = True
+                tier_confidence = tier_record.get("confidence") or "litellm"
+        if not tier_priced:
+            mult = data["multipliers"].get(tkey)
+            if mult:
+                priced, priced_fallbacks = _cost_from_record(
+                    _scaled_record(record, mult), net_in, cached, out)
+                if priced is not None:
+                    cost, cost_fallbacks = priced, priced_fallbacks
+                    tier_priced = True
+                    tier_confidence = "multiplier"
+
+    detail = {
+        "model": model,
+        "matched": key,
+        "cost_usd": cost,
+        "fallbacks": cost_fallbacks,
+        "standard_cost_usd": standard_cost,
+        "tier": effective,
+        "tier_priced": tier_priced,
+    }
+    if tier_confidence:
+        detail["tier_confidence"] = tier_confidence
+    if alias is not None:
+        detail["priced_as"] = str(alias.get("model"))
+        detail["assumed"] = bool(alias.get("assumed", True))
+    return detail
+
+
+def model_cost(pricing: dict[str, dict], model: str, net_in: int, cached: int, out: int,
+               *, tier: str | None = None, config_tier: str | None = None) -> float | None:
     """单模型成本（USD）；无定价模型返回 None（调用方按 $0 计并标注 *）。
 
-    需要区分“缓存读价回退到 input 价”时用 ``model_cost_detail()``。
+    ``tier`` 给 ``priority``/``fast``/``flex`` 时按对应档位价计（默认标准价）；
+    诊断（是否回退、是否别名映射、档位价置信度）用 ``model_cost_detail()``。
     """
-    detail = model_cost_detail(pricing, model, net_in, cached, out)
+    detail = model_cost_detail(pricing, model, net_in, cached, out,
+                               tier=tier, config_tier=config_tier)
     return detail["cost_usd"] if detail else None
+
+
+def cost_for_tiered(tiers: dict[str, dict[str, list[int]]], pricing: dict[str, dict],
+                    *, config_tier: str | None = None) -> dict:
+    """按 ``Session.tiers``（``{model: {tier: [gross_in, cached, out, ...]}}``）分档计价。
+
+    返回 ``{"cost_usd", "all_priced", "models": {model: {"cost_usd", "tiers": {...}}}}``，
+    供 stats/cli 接入（每个 (模型, 档位) 槽单独计价，槽位语义与 ``Session.models`` 一致）。
+    """
+    total, all_priced = 0.0, True
+    models: dict[str, dict] = {}
+    for model, slots in (tiers or {}).items():
+        model_total = 0.0
+        per_tier: dict[str, dict] = {}
+        for tier, slot in (slots or {}).items():
+            gross, cached, out = int(slot[0]), int(slot[1]), int(slot[2])
+            detail = model_cost_detail(pricing, model, gross - cached, cached, out,
+                                       tier=tier, config_tier=config_tier)
+            if detail is None:
+                all_priced = False
+                cost = 0.0
+            else:
+                cost = detail["cost_usd"]
+            model_total += cost
+            per_tier[tier] = {"cost_usd": cost, "priced": detail is not None,
+                              "tier": detail["tier"] if detail else None}
+        models[model] = {"cost_usd": model_total, "tiers": per_tier}
+        total += model_total
+    return {"cost_usd": total, "all_priced": all_priced, "models": models}
 
 
 def cache_read_coverage(pricing: dict[str, dict]) -> dict:
@@ -522,6 +836,51 @@ def records_from_litellm(raw) -> list[dict]:
         seen.add(key)
         records.append(rec)
     return records
+
+
+def _record_id_key(record: dict) -> str:
+    return str(record.get("modelId", ""))
+
+
+def tier_records_from_litellm(raw) -> dict:
+    """LiteLLM 快照 → 档位价数据 ``{"priority": [...], "flex": [...], "multipliers": {...}}``。
+
+    只取**裸名**条目（无 provider 前缀）的 ``*_priority`` / ``*_flex`` 字段（$/token → $/M）。
+    ``confidence``：``official`` = OpenAI 官方 Fast/Flex 价目表有独立行；``litellm`` = 只有
+    第三方快照（5.1/5.2/5.3-codex 这类官方无 Fast 行的模型，标低置信）。
+    ``multipliers`` 仅收录官方档位模型（逐模型倍率，避免“统一 2×”在 5.5 上少算 20%）。
+    """
+    rows: dict = {"priority": [], "flex": [], "multipliers": {}}
+    if not isinstance(raw, dict):
+        return rows
+    for model_id, model in raw.items():
+        if not isinstance(model, dict) or model_id == "sample_spec" or "/" in model_id:
+            continue
+        key = clean_model_id(model_id)
+        if not key:
+            continue
+        for tier in ("priority", "flex"):
+            rec = _record(key,
+                          _per_million(model.get(f"input_cost_per_token_{tier}")),
+                          _per_million(model.get(f"output_cost_per_token_{tier}")),
+                          _per_million(model.get(f"cache_read_input_token_cost_{tier}")))
+            if rec is None or _is_non_text(key, model.get("mode")):
+                continue
+            rec["confidence"] = "official" if key.lower() in OFFICIAL_TIER_MODELS else "litellm"
+            rows[tier].append(rec)
+        base_input = _per_million(model.get("input_cost_per_token"))
+        priority_input = _per_million(model.get("input_cost_per_token_priority"))
+        if base_input and priority_input and key.lower() in OFFICIAL_TIER_MODELS:
+            rows["multipliers"][key.lower()] = round(priority_input / base_input, 4)
+    for tier in ("priority", "flex"):
+        seen, unique = set(), []
+        for rec in sorted(rows[tier], key=_record_id_key):
+            if rec["modelId"] in seen:
+                continue
+            seen.add(rec["modelId"])
+            unique.append(rec)
+        rows[tier] = unique
+    return rows
 
 
 def records_from(source: str, raw) -> list[dict]:

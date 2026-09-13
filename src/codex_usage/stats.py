@@ -6,7 +6,28 @@ from collections import defaultdict
 from datetime import datetime
 
 from .parser import Session
-from .pricing import model_cost
+from .pricing import default_service_tier, model_cost
+
+
+def _cost_by_tier(rec: Session, mname: str, slot: list[int], pricing: dict,
+                  config_tier: str) -> float | None:
+    """该模型成本：有档位明细就逐档计价（priority/Fast 与标准价不同），否则整块计价。
+
+    无价返回 None（调用方按 $0 计并标 *）。`unknown` 档由定价层按 config.toml 的
+    service_tier 处理，所以这里把档位原值原样传下去。
+    """
+    tiers = (rec.tiers or {}).get(mname)
+    if not tiers:
+        return model_cost(pricing, mname, slot[0] - slot[1], slot[1], slot[2])
+    total, priced = 0.0, True
+    for tier, tslot in tiers.items():
+        c = model_cost(pricing, mname, tslot[0] - tslot[1], tslot[1], tslot[2],
+                       tier=tier, config_tier=config_tier)
+        if c is None:
+            priced = False
+        else:
+            total += c
+    return total if priced else None
 
 
 def rec_tokens(rec: Session) -> tuple[int, int, int]:
@@ -20,9 +41,10 @@ def rec_tokens(rec: Session) -> tuple[int, int, int]:
 
 def rec_cost(rec: Session, pricing: dict) -> tuple[float, bool]:
     """(成本[无定价按 $0], 是否全部模型有定价)"""
+    cfg = default_service_tier()
     total, known = 0.0, True
     for mname, v in rec.models.items():
-        c = model_cost(pricing, mname, v[0] - v[1], v[1], v[2])
+        c = _cost_by_tier(rec, mname, v, pricing, cfg)
         if c is None:
             known = False
         else:
@@ -38,10 +60,11 @@ def rec_calls(rec: Session) -> int:
 def aggregate_models(recs: list[Session], pricing: dict) -> dict[str, list]:
     """聚合一组会话 → {model: [net, cached, out, calls, cost, known, nsess]}，按会话去重计数。"""
     agg: dict[str, list] = {}
+    cfg = default_service_tier()
     for r in recs:
         seen = set()
         for mname, v in r.models.items():
-            c = model_cost(pricing, mname, v[0] - v[1], v[1], v[2])
+            c = _cost_by_tier(r, mname, v, pricing, cfg)
             a = agg.setdefault(mname, [0, 0, 0, 0, 0.0, True, 0])
             a[0] += v[0] - v[1]
             a[1] += v[1]

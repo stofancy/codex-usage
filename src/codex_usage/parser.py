@@ -293,6 +293,15 @@ def collect(sessions_dir: str, since: datetime, until: datetime,
             slot = old.models.setdefault(mname, [0, 0, 0, 0, 0])
             for i in range(5):
                 slot[i] += v[i]
+        for mname, tiers in r.tiers.items():     # 分页文件同样要合并档位明细，否则
+            dest = old.tiers.setdefault(mname, {})   # tiers 合计会小于 models（实测差 4.81M 毛输入）
+            for tname, tslot in tiers.items():
+                dslot = dest.setdefault(tname, [0, 0, 0, 0, 0])
+                for i in range(5):
+                    dslot[i] += tslot[i]
+        old.delta_sum += r.delta_sum
+        old.resets += r.resets
+        old.fallbacks += r.fallbacks
         old.parent = old.parent or r.parent
         old.agent = old.agent or r.agent
         old.multi_model = len(old.models) > 1

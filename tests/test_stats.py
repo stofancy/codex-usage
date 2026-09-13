@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from codex_usage.parser import collect
+from codex_usage.parser import Session, collect
 from codex_usage.pricing import load_pricing
 from codex_usage import stats
 
@@ -67,3 +67,43 @@ def test_totals_invariant_across_aggregations(env):
         for i, v in enumerate(totals(rs)):
             by_day[i] += v
     assert by_session == by_model == by_day
+
+
+def _rec(model, slots_by_tier, pricing):
+    """构造仅用于计价的最小 Session。"""
+    rec = Session(file="f", sid="s", uuids=["u"])
+    total = [0, 0, 0, 0, 0]
+    for slot in slots_by_tier.values():
+        for i in range(5):
+            total[i] += slot[i]
+    rec.models = {model: total}
+    rec.tiers = {model: slots_by_tier}
+    return rec
+
+
+def test_rec_cost_applies_tier_multiplier():
+    """priority/Fast 档按官方倍率计价，成本必须高于同量标准档（astra 官方 2.0×）。"""
+    from codex_usage.pricing import load_pricing
+    from codex_usage import stats
+
+    pricing = load_pricing()
+    std = _rec("gpt-6-astra", {"standard": [1000, 0, 100, 0, 1]}, pricing)
+    mix = _rec("gpt-6-astra", {"standard": [500, 0, 50, 0, 1],
+                               "priority": [500, 0, 50, 0, 1]}, pricing)
+    std_cost, std_known = stats.rec_cost(std, pricing)
+    mix_cost, mix_known = stats.rec_cost(mix, pricing)
+    assert std_known and mix_known
+    assert mix_cost > std_cost                      # Fast 档加成
+    assert mix_cost < std_cost * 2                  # 但只有一半用量在 Fast 档
+
+
+def test_rec_cost_falls_back_when_no_tiers():
+    """没有档位明细（老数据/异常）时仍能整块计价，不报错。"""
+    from codex_usage.pricing import load_pricing
+    from codex_usage import stats
+
+    pricing = load_pricing()
+    rec = Session(file="f", sid="s", uuids=["u"])
+    rec.models = {"gpt-6-astra": [1000, 0, 100, 0, 1]}
+    cost, known = stats.rec_cost(rec, pricing)
+    assert known and cost > 0

@@ -69,9 +69,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chart raster size now follows the terminal's reported pixel size (avoids upscaling the
   PNG and blurring thin lines), crowded x-axis labels are thinned out, and axis ticks use
   compact forms such as `120K` / `3.4B`.
+- `--json` gained `metering` (`resets` / `fallbacks` / `delta_sum`) and `tiers` (per model ×
+  service tier, from `thread_settings_applied`) so metering decisions are auditable; `--schema`
+  documents both. `--doctor` additionally reports how much of the pricing table lacks a
+  cache-read price.
 
 ### Fixed
 
+- Token metering now follows the cumulative `total_token_usage` delta instead of summing the
+  per-turn `last_token_usage`: 53% of session files repeat a cumulative snapshot, and 11
+  subagent files start with an inherited parent-history snapshot (the largest at 14,051,760
+  tokens with a zero delta), so the old path over-counted by about 2% and double-counted
+  replayed prefixes. The first snapshot is counted at its own delta, a mid-file jump larger
+  than that turn's delta is capped by it, and a cumulative drop (context compaction) or a
+  missing cumulative field falls back to `last_token_usage`.
+- `sessions/` and `archived_sessions/` copies of the same session are now de-duplicated
+  (`sessions/` wins) instead of being summed into one session.
+- Pricing: a missing or explicitly zero `cacheReadCostPerMillion` now falls back to that
+  model's input price instead of charging cached reads at $0 (33.6% of the bundled table has
+  no cache-read price).
 - Test fixtures no longer hard-code UTC timestamps: they follow the host time zone, so the
   suite passes on runners in any zone (it failed on every CI Python version before).
 - Real-image charts: rotated x-axis labels no longer push into the plot area, and legends

@@ -261,3 +261,22 @@ def test_archived_duplicate_not_double_counted(tmp_path):
     assert len(recs) == 1
     assert recs[0].models["gpt-x"][0] == 100          # 没有被累加成 200
     assert os.path.dirname(recs[0].file) == os.path.dirname(active)
+
+
+def test_pagination_merge_keeps_tier_totals(tmp_path):
+    """分页文件合并时 tiers 也要累加：曾漏合并，导致 tiers 合计比 models 少 4.81M 毛输入，
+    分档计价随之少算（全库唯一破例来自分页会话）。"""
+    uid2 = "01a09a5f-a44e-75e1-ba40-000000000002"
+    _write(tmp_path / "2026" / "09" / "11" / f"rollout-2026-09-11T09-00-00-{UID}.jsonl",
+           _meta(), _turn("gpt-x"), _settings("priority"),
+           _tok(_usage(300, 0, 30), _usage(300, 0, 30)))
+    _write(tmp_path / "2026" / "09" / "11" / f"rollout-2026-09-11T10-00-00-{UID}_{uid2}.jsonl",
+           _meta(), _turn("gpt-x"), _settings("default"),
+           _tok(_usage(200, 0, 20), _usage(200, 0, 20)))
+    recs = collect(str(tmp_path), datetime(2026, 9, 11), datetime(2026, 9, 11, 23, 59, 59))
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec.models["gpt-x"][0] == 500
+    assert set(rec.tiers["gpt-x"]) == {"priority", "default"}
+    for i in range(5):
+        assert sum(t[i] for t in rec.tiers["gpt-x"].values()) == rec.models["gpt-x"][i]

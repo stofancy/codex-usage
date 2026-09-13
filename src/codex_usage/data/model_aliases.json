@@ -1,0 +1,18 @@
+{
+  "version": "2026-09-13",
+  "updated": "2026-09-13",
+  "note": "无公开价标签的假设性映射表。assumed=true 的条目会在输出里保留原始标签 + priced_as；依据见 docs/pricing-facts.md 与 docs/pricing.md。顶层字段可被 CODEX_USAGE_ALIASES_FILE 覆盖。",
+  "aliases": {
+    "codex-auto-review": {
+      "model": "gpt-5.5",
+      "assumed": true,
+      "confidence": "high",
+      "source": "ccusage rust/adapters/codex/src/codex-auto-review-fallbacks.json（抓取 2026-09-13）+ docs/pricing-facts.md §3.3 三方对账",
+      "note": "Codex 模型目录中该 slug 没有任何价格字段，官方 issue #20981 至今 open。ccusage 仅在 model == codex-auto-review 时按发布日期映射到当时最新已知 gpt-5.x；2026-09-12 的日志 → gpt-5.5。本机不存在真实 gpt-5.5 轮次，且 token 三方对账一致（差异 ~2% 来自归日与子代理 replay 处理）。映射是假设，输出标 assumed。"
+    }
+  },
+  "not_mapped": {
+    "gpt-reserve": "Luna Reserve（额度耗尽后的兜底路由）：OpenAI 官方 / LiteLLM / models.dev 均无价，ccusage 也计 $0。agentsview 映射到 gpt-5.6-luna 是另一个工具的选择，本项目不臆造，保持 $0.00*。",
+    "gpt-5-codex": "官方 Fast 价目表无行、LiteLLM 也没有 priority/flex 价 → 无公开 Fast 价；出现 Fast 轮次时按标准价计并保持可诊断，不臆造倍率。"
+  }
+}

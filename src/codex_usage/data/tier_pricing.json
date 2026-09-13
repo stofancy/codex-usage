@@ -1,0 +1,610 @@
+{
+ "source": "LiteLLM model_prices_and_context_window.json @ b1a61f510c90 (2026-09-13T04:13:52Z)",
+ "updated": "2026-09-13T04:13:52+00:00",
+ "license": "MIT (https://github.com/BerriAI/litellm)",
+ "note": "priority ≡ fast（OpenAI 2026-07-30 改名）；official = 官方 Fast/Flex 价目表有独立行，litellm = 只有第三方快照（官方无 Fast 行，低置信）。倍率仅收录官方档位模型。",
+ "priority": [
+  {
+   "modelId": "gemini-3-flash-preview",
+   "inputCostPerMillion": 0.9,
+   "cacheReadCostPerMillion": 0.09,
+   "outputCostPerMillion": 5.4,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3-pro-preview",
+   "inputCostPerMillion": 3.6,
+   "cacheReadCostPerMillion": 0.36,
+   "outputCostPerMillion": 21.6,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.1-flash-lite",
+   "inputCostPerMillion": 0.45,
+   "cacheReadCostPerMillion": 0.045,
+   "outputCostPerMillion": 2.7,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.1-pro-preview",
+   "inputCostPerMillion": 3.6,
+   "cacheReadCostPerMillion": 0.36,
+   "outputCostPerMillion": 21.6,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.5-flash",
+   "inputCostPerMillion": 2.7,
+   "cacheReadCostPerMillion": 0.27,
+   "outputCostPerMillion": 16.2,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.5-flash-lite",
+   "inputCostPerMillion": 0.54,
+   "cacheReadCostPerMillion": 0.05,
+   "outputCostPerMillion": 4.5,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.6-flash",
+   "inputCostPerMillion": 1.35,
+   "cacheReadCostPerMillion": 0.135,
+   "outputCostPerMillion": 6.75,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.7-flash",
+   "inputCostPerMillion": 1.35,
+   "cacheReadCostPerMillion": 0.135,
+   "outputCostPerMillion": 6.75,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.8-flash",
+   "inputCostPerMillion": 1.35,
+   "cacheReadCostPerMillion": 0.135,
+   "outputCostPerMillion": 6.75,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4.1",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.875,
+   "outputCostPerMillion": 14.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4.1-2025-04-14",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.875,
+   "outputCostPerMillion": 14.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4.1-mini",
+   "inputCostPerMillion": 0.7,
+   "cacheReadCostPerMillion": 0.175,
+   "outputCostPerMillion": 2.8,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4.1-mini-2025-04-14",
+   "inputCostPerMillion": 0.7,
+   "cacheReadCostPerMillion": 0.175,
+   "outputCostPerMillion": 2.8,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4.1-nano",
+   "inputCostPerMillion": 0.2,
+   "cacheReadCostPerMillion": 0.05,
+   "outputCostPerMillion": 0.8,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4.1-nano-2025-04-14",
+   "inputCostPerMillion": 0.2,
+   "cacheReadCostPerMillion": 0.05,
+   "outputCostPerMillion": 0.8,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4o",
+   "inputCostPerMillion": 4.25,
+   "cacheReadCostPerMillion": 2.125,
+   "outputCostPerMillion": 17.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4o-2024-05-13",
+   "inputCostPerMillion": 8.75,
+   "cacheReadCostPerMillion": 0.0,
+   "outputCostPerMillion": 26.25,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4o-2024-08-06",
+   "inputCostPerMillion": 4.25,
+   "cacheReadCostPerMillion": 2.125,
+   "outputCostPerMillion": 17.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4o-2024-11-20",
+   "inputCostPerMillion": 4.25,
+   "cacheReadCostPerMillion": 2.125,
+   "outputCostPerMillion": 17.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4o-mini",
+   "inputCostPerMillion": 0.25,
+   "cacheReadCostPerMillion": 0.125,
+   "outputCostPerMillion": 1.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-4o-mini-2024-07-18",
+   "inputCostPerMillion": 0.25,
+   "cacheReadCostPerMillion": 0.125,
+   "outputCostPerMillion": 1.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 20.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5-2025-08-07",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 20.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5-mini",
+   "inputCostPerMillion": 0.45,
+   "cacheReadCostPerMillion": 0.045,
+   "outputCostPerMillion": 3.6,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5-mini-2025-08-07",
+   "inputCostPerMillion": 0.45,
+   "cacheReadCostPerMillion": 0.045,
+   "outputCostPerMillion": 3.6,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.1",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 20.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.1-2025-11-13",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 20.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.1-chat-latest",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 20.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.1-codex",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 20.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.1-codex-mini",
+   "inputCostPerMillion": 0.45,
+   "cacheReadCostPerMillion": 0.045,
+   "outputCostPerMillion": 3.6,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.2",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.35,
+   "outputCostPerMillion": 28.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.2-2025-12-11",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.35,
+   "outputCostPerMillion": 28.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.2-chat-latest",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.35,
+   "outputCostPerMillion": 28.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.2-codex",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.35,
+   "outputCostPerMillion": 28.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.3-chat-latest",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.35,
+   "outputCostPerMillion": 28.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.3-codex",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.35,
+   "outputCostPerMillion": 28.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4",
+   "inputCostPerMillion": 5.0,
+   "cacheReadCostPerMillion": 0.5,
+   "outputCostPerMillion": 30.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.4-2026-03-05",
+   "inputCostPerMillion": 5.0,
+   "cacheReadCostPerMillion": 0.5,
+   "outputCostPerMillion": 30.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4-mini",
+   "inputCostPerMillion": 1.5,
+   "cacheReadCostPerMillion": 0.15,
+   "outputCostPerMillion": 9.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.4-mini-2026-03-17",
+   "inputCostPerMillion": 1.5,
+   "cacheReadCostPerMillion": 0.15,
+   "outputCostPerMillion": 9.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.5",
+   "inputCostPerMillion": 12.5,
+   "cacheReadCostPerMillion": 1.25,
+   "outputCostPerMillion": 75.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.5-2026-04-23",
+   "inputCostPerMillion": 12.5,
+   "cacheReadCostPerMillion": 1.25,
+   "outputCostPerMillion": 75.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.6",
+   "inputCostPerMillion": 8.0,
+   "cacheReadCostPerMillion": 0.8,
+   "outputCostPerMillion": 40.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.6-luna",
+   "inputCostPerMillion": 0.4,
+   "cacheReadCostPerMillion": 0.04,
+   "outputCostPerMillion": 2.4,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.6-sol",
+   "inputCostPerMillion": 8.0,
+   "cacheReadCostPerMillion": 0.8,
+   "outputCostPerMillion": 40.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.6-terra",
+   "inputCostPerMillion": 4.0,
+   "cacheReadCostPerMillion": 0.4,
+   "outputCostPerMillion": 24.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-6-astra",
+   "inputCostPerMillion": 20.0,
+   "cacheReadCostPerMillion": 2.0,
+   "outputCostPerMillion": 100.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "o3",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.875,
+   "outputCostPerMillion": 14.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "o3-2025-04-16",
+   "inputCostPerMillion": 3.5,
+   "cacheReadCostPerMillion": 0.875,
+   "outputCostPerMillion": 14.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "o4-mini",
+   "inputCostPerMillion": 2.0,
+   "cacheReadCostPerMillion": 0.5,
+   "outputCostPerMillion": 8.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "o4-mini-2025-04-16",
+   "inputCostPerMillion": 2.0,
+   "cacheReadCostPerMillion": 0.5,
+   "outputCostPerMillion": 8.0,
+   "confidence": "litellm"
+  }
+ ],
+ "flex": [
+  {
+   "modelId": "gemini-3.1-flash-lite",
+   "inputCostPerMillion": 0.125,
+   "cacheReadCostPerMillion": 0.0125,
+   "outputCostPerMillion": 0.75,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.5-flash",
+   "inputCostPerMillion": 0.75,
+   "cacheReadCostPerMillion": 0.075,
+   "outputCostPerMillion": 4.5,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.5-flash-lite",
+   "inputCostPerMillion": 0.15,
+   "cacheReadCostPerMillion": 0.015,
+   "outputCostPerMillion": 1.25,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.6-flash",
+   "inputCostPerMillion": 0.375,
+   "cacheReadCostPerMillion": 0.0375,
+   "outputCostPerMillion": 1.875,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.7-flash",
+   "inputCostPerMillion": 0.375,
+   "cacheReadCostPerMillion": 0.0375,
+   "outputCostPerMillion": 1.875,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gemini-3.8-flash",
+   "inputCostPerMillion": 0.375,
+   "cacheReadCostPerMillion": 0.0375,
+   "outputCostPerMillion": 1.875,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5",
+   "inputCostPerMillion": 0.625,
+   "cacheReadCostPerMillion": 0.0625,
+   "outputCostPerMillion": 5.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5-2025-08-07",
+   "inputCostPerMillion": 0.625,
+   "cacheReadCostPerMillion": 0.0625,
+   "outputCostPerMillion": 5.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5-mini",
+   "inputCostPerMillion": 0.125,
+   "cacheReadCostPerMillion": 0.0125,
+   "outputCostPerMillion": 1.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5-mini-2025-08-07",
+   "inputCostPerMillion": 0.125,
+   "cacheReadCostPerMillion": 0.0125,
+   "outputCostPerMillion": 1.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5-nano",
+   "inputCostPerMillion": 0.025,
+   "cacheReadCostPerMillion": 0.0025,
+   "outputCostPerMillion": 0.2,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5-nano-2025-08-07",
+   "inputCostPerMillion": 0.025,
+   "cacheReadCostPerMillion": 0.0025,
+   "outputCostPerMillion": 0.2,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4",
+   "inputCostPerMillion": 1.25,
+   "cacheReadCostPerMillion": 0.13,
+   "outputCostPerMillion": 7.5,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.4-2026-03-05",
+   "inputCostPerMillion": 1.25,
+   "cacheReadCostPerMillion": 0.13,
+   "outputCostPerMillion": 7.5,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4-mini",
+   "inputCostPerMillion": 0.375,
+   "cacheReadCostPerMillion": 0.0375,
+   "outputCostPerMillion": 2.25,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.4-mini-2026-03-17",
+   "inputCostPerMillion": 0.375,
+   "cacheReadCostPerMillion": 0.0375,
+   "outputCostPerMillion": 2.25,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4-nano",
+   "inputCostPerMillion": 0.1,
+   "cacheReadCostPerMillion": 0.01,
+   "outputCostPerMillion": 0.625,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4-nano-2026-03-17",
+   "inputCostPerMillion": 0.1,
+   "cacheReadCostPerMillion": 0.01,
+   "outputCostPerMillion": 0.625,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4-pro",
+   "inputCostPerMillion": 15.0,
+   "cacheReadCostPerMillion": 0.0,
+   "outputCostPerMillion": 90.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.4-pro-2026-03-05",
+   "inputCostPerMillion": 15.0,
+   "cacheReadCostPerMillion": 0.0,
+   "outputCostPerMillion": 90.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.5",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 15.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.5-2026-04-23",
+   "inputCostPerMillion": 2.5,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 15.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.5-pro",
+   "inputCostPerMillion": 15.0,
+   "cacheReadCostPerMillion": 0.0,
+   "outputCostPerMillion": 90.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.5-pro-2026-04-23",
+   "inputCostPerMillion": 15.0,
+   "cacheReadCostPerMillion": 0.0,
+   "outputCostPerMillion": 90.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.6",
+   "inputCostPerMillion": 2.0,
+   "cacheReadCostPerMillion": 0.2,
+   "outputCostPerMillion": 10.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "gpt-5.6-luna",
+   "inputCostPerMillion": 0.1,
+   "cacheReadCostPerMillion": 0.01,
+   "outputCostPerMillion": 0.6,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.6-sol",
+   "inputCostPerMillion": 2.0,
+   "cacheReadCostPerMillion": 0.2,
+   "outputCostPerMillion": 10.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-5.6-terra",
+   "inputCostPerMillion": 1.0,
+   "cacheReadCostPerMillion": 0.1,
+   "outputCostPerMillion": 6.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-6-astra",
+   "inputCostPerMillion": 5.0,
+   "cacheReadCostPerMillion": 0.5,
+   "outputCostPerMillion": 25.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "o3",
+   "inputCostPerMillion": 1.0,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 4.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "o3-2025-04-16",
+   "inputCostPerMillion": 1.0,
+   "cacheReadCostPerMillion": 0.25,
+   "outputCostPerMillion": 4.0,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "o4-mini",
+   "inputCostPerMillion": 0.55,
+   "cacheReadCostPerMillion": 0.1375,
+   "outputCostPerMillion": 2.2,
+   "confidence": "litellm"
+  },
+  {
+   "modelId": "o4-mini-2025-04-16",
+   "inputCostPerMillion": 0.55,
+   "cacheReadCostPerMillion": 0.1375,
+   "outputCostPerMillion": 2.2,
+   "confidence": "litellm"
+  }
+ ],
+ "multipliers": {
+  "gpt-5": 2.0,
+  "gpt-5.1": 2.0,
+  "gpt-5.2": 2.0,
+  "gpt-6-astra": 2.0,
+  "gpt-5.6-sol": 2.0,
+  "gpt-5.6-terra": 2.0,
+  "gpt-5.6-luna": 2.0,
+  "gpt-5.5": 2.5,
+  "gpt-5.4": 2.0,
+  "gpt-5.4-mini": 2.0
+ }
+}
