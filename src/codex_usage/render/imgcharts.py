@@ -322,17 +322,30 @@ def _x_layout(labels: list[str], sz: dict) -> tuple[list[int], list[str], bool]:
 
 
 def _xticks(ax, labels: list[str], sz: dict) -> None:
-    """设置 x 轴刻度：抽稀 + 斜排；斜排时首尾标签朝画布内对齐，避免左右越界。"""
+    """设置 x 轴刻度：抽稀 + 斜排；斜排时统一朝左下延伸，并给左边界预留标签占位。"""
     idx, shown, rotate = _x_layout(labels, sz)
     ax.set_xticks(idx, shown)
     if not rotate:
         return
     ax.tick_params(axis="x", labelrotation=45, rotation_mode="anchor")
-    ticks = ax.get_xticklabels()
-    for t in ticks:
-        t.set_ha("right")                       # 斜排锚在刻度上并向左下延伸，末位不再右溢
-    if ticks:
-        ticks[0].set_ha("left")
+    for t in ax.get_xticklabels():
+        t.set_ha("right")                       # 斜排锚在刻度上向左下延伸（含首标签，避免压进绘图区）
+    _reserve_left_for_rotated(ax, shown, sz)
+
+
+def _reserve_left_for_rotated(ax, shown: list[str], sz: dict) -> None:
+    """45° 斜排的首标签会向左延伸：把左边界推出去，否则它会越出画布。
+
+    早先的写法是把首标签改成 ha="left"（朝右延伸），代价是长模型名会压进绘图区；
+    这里改成给左边界留出标签水平投影的空间，对齐方式保持标准。
+    """
+    if not shown:
+        return
+    need_px = (_text_w(shown[0], sz["tick_px"]) + sz["tick_px"]) * 0.71   # 宽度与高度各投影一次
+    pos = ax.get_position()
+    want = min(0.42, need_px / max(1, sz["px_w"]))
+    if want > pos.x0:
+        ax.figure.subplots_adjust(left=want)
 
 
 def chart_pie(model_agg: dict[str, list], metric: str):

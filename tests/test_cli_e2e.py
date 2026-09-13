@@ -5,7 +5,6 @@ import subprocess
 import sys
 from datetime import datetime
 
-import pytest
 
 MOD = "codex_usage.cli"
 
@@ -47,8 +46,8 @@ def test_by_model_aggregation_semantics(env):
     r = run(env, "--by-model")
     assert r.returncode == 0
     head = r.stdout.splitlines()[:3]
-    assert any("会话数" in l for l in head)          # 聚合表表头
-    assert not any("时间" in l for l in head)         # 无会话明细列
+    assert any("会话数" in line for line in head)          # 聚合表表头
+    assert not any("时间" in line for line in head)         # 无会话明细列
     import re
     ids = re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}", r.stdout)
     assert not ids                                   # 聚合表无会话 ID
@@ -56,7 +55,7 @@ def test_by_model_aggregation_semantics(env):
     models = set()
     for ln in rj.stdout.splitlines():
         models |= set(json.loads(ln)["models"])
-    rows = [l for l in r.stdout.splitlines() if l.strip().startswith(("gpt-",))]
+    rows = [line for line in r.stdout.splitlines() if line.strip().startswith(("gpt-",))]
     assert len(rows) == len(models)
 
 
@@ -70,7 +69,7 @@ def test_unpriced_model_counted(env):
 
 def test_json_output(env):
     r = run(env, "--json")
-    lines = [json.loads(l) for l in r.stdout.splitlines()]
+    lines = [json.loads(line) for line in r.stdout.splitlines()]
     assert lines
     for d in lines:
         assert {"session_id", "models", "input_net", "cost_usd_known",
@@ -112,9 +111,9 @@ def test_new_metric_columns_and_alignment(env):
     assert r.returncode == 0
     for head in ("总 tokens", "调用", "单次成本"):
         assert head in r.stdout
-    lines = [l.rstrip() for l in r.stdout.splitlines() if l.strip()]
-    data = next(l for l in lines if l.strip().startswith("gpt-"))
-    total = next(l for l in lines if "合计" in l and "$" in l)
+    lines = [line.rstrip() for line in r.stdout.splitlines() if line.strip()]
+    data = next(line for line in lines if line.strip().startswith("gpt-"))
+    total = next(line for line in lines if "合计" in line and "$" in line)
 
     def display_col(line: str, idx: int) -> int:
         return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line[:idx])

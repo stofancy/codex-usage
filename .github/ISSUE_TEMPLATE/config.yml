@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (do not disclose publicly)
+    url: https://github.com/stofancy/codex-usage/security/advisories/new
+    about: Private reporting channel - see SECURITY.md for scope and what to include
+  - name: Contributing guide
+    url: https://github.com/stofancy/codex-usage/blob/main/CONTRIBUTING.md
+    about: Local setup, tests, static checks and the pull request process
+  - name: Data and privacy statement
+    url: https://github.com/stofancy/codex-usage/blob/main/SECURITY.md
+    about: Which local files are read, when the tool can use the network, and why charts are never written to disk

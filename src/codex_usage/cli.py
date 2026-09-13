@@ -9,6 +9,7 @@
                 （终端+image extras 出真图，--ascii/管道/未装依赖回退字符画）
   --schema      机器可读自描述（命令契约、字段、退出码的 JSON 版帮助）
   --doctor      环境自检（数据源、定价表、真图能力、终端档位）
+  --update-pricing  唯一联网动作：从公开渠道刷新本地定价缓存（用户显式触发）
   无 --by-*     行 = 实体（会话或文件）明细
 
 帮助入口：-h / --help / /? / -? / help
@@ -32,7 +33,7 @@ from .render import charts, imgcharts, tables
 KNOWN_FLAGS = {"--since", "--until", "--by-day", "--family", "--raw", "--by-model",
                "--type", "--parent", "--session", "--model", "--archived", "--json",
                "--chart", "--metric", "--ascii", "--schema", "--doctor",
-               "--version", "--help"}
+               "--update-pricing", "--pricing-source", "--version", "--help"}
 
 
 def _fix_single_dash(argv: list[str]) -> list[str]:
@@ -77,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="自描述: 输出机器可读契约 JSON（选项、字段、语义、退出码）")
     ap.add_argument("--doctor", action="store_true",
                     help="自检: 报告数据源/定价表/真图能力/终端档位（配 --json 输出结构化）")
+    ap.add_argument("--update-pricing", action="store_true",
+                    help="定价: 从公开渠道拉取定价写入本地缓存（随后自动使用；默认 models.dev）")
+    ap.add_argument("--pricing-source", choices=("models.dev", "litellm"), default="models.dev",
+                    help="定价: --update-pricing 的数据源（默认 models.dev）")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}",
                     help="显示版本号")
     return ap
@@ -218,6 +223,23 @@ def main():
         sys.exit(141)
 
 
+def _update_pricing(args) -> None:
+    """--update-pricing：从公开渠道刷新本地定价缓存（唯一的联网动作，仅用户显式触发）。
+
+    延迟导入：定价同步是可选路径，不该拖慢每次启动，也不该让整个 CLI 依赖它。
+    """
+    try:
+        from .pricing import sync as sync_pricing
+        info = sync_pricing(args.pricing_source, timeout=30.0)
+    except Exception as e:
+        raise SystemExit(f"定价更新失败（{type(e).__name__}: {e}）；可继续用内置定价表")
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+    else:
+        print(f"定价已更新：{info.get('models', '?')} 个模型 → {info.get('path', '?')}"
+              f"（来源 {info.get('source', args.pricing_source)}）")
+
+
 def _main():
     argv = sys.argv[1:]
     if argv and argv[0] in ("/?", "-?", "help"):   # Windows 风格与子命令风格帮助入口
@@ -232,6 +254,9 @@ def _main():
         report = selfdoc.doctor()
         print(json.dumps(report, ensure_ascii=False, indent=2) if args.json
               else selfdoc.format_doctor(report))
+        return
+    if args.update_pricing:                        # 定价刷新先于数据扫描
+        _update_pricing(args)
         return
     if args.chart:
         # 参数冲突先于数据扫描与依赖探测报出，避免无数据时静默通过

@@ -44,7 +44,7 @@ def test_schema_fields_match_real_json_output(env):
     """schema 声明的 JSON 字段与真实 --json 输出对账（防契约漂移）。"""
     r = run("--json", "--since", "2026-09-10", "--until", "2026-09-11")
     assert r.returncode == 0, r.stderr[-300:]
-    records = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
+    records = [json.loads(line) for line in r.stdout.splitlines() if line.strip()]
     assert records
     fields = selfdoc.schema(build_parser())["json_output"]
     assert set(records[0]) == set(fields["fields"])
@@ -66,25 +66,41 @@ def test_doctor_reports_environment(env):
     assert d["version"] and d["python"] and d["executable"]
     assert d["data"]["sessions_dir"]["exists"] is True
     assert d["data"]["sessions_dir"]["rollout_files"] > 0
-    assert d["data"]["pricing_file"]["models"] == 2      # 夹具定价表 2 个模型
+    assert d["data"]["pricing_file"]["models"] >= 10     # 合并后（内置表作基底）
+    assert "env-file" in d["data"]["pricing_file"]["source"]   # 夹具的自定义表覆盖生效
     assert d["render"]["tier"]
     assert d["render"]["mode"] in ("auto", "tgp", "sixel", "halfcell", "ascii")
     assert d["render"]["detected"]                       # 自动探测结果保留
     text = selfdoc.format_doctor(d)
-    for section in ("会话数据", "归档数据", "定价表", "图表渲染", "中文字体"):
+    for section in ("会话数据", "归档数据", "定价", "图表渲染", "中文字体"):
         assert section in text
     assert d["ok"] is True                               # 夹具环境下不该有告警
 
 
 def test_doctor_reports_missing_sources(monkeypatch, tmp_path):
-    """数据源缺失时要给出可操作提示，而不是静默成功。"""
+    """会话目录缺失是真问题；自定义定价文件无效则回退内置表（说明而非告警）。"""
     monkeypatch.setenv("CODEX_USAGE_SESSIONS_DIR", str(tmp_path / "nope"))
     monkeypatch.setenv("CODEX_USAGE_PRICING_FILE", str(tmp_path / "nope.json"))
     d = selfdoc.doctor()
     assert d["ok"] is False
-    joined = " ".join(d["hints"])
-    assert "会话目录不存在" in joined and "定价表缺失" in joined
+    hints = " ".join(d["hints"])
+    assert "会话目录不存在" in hints
+    assert "定价不可用" not in hints                      # 内置表兜底，不该报错
+    assert d["data"]["pricing_file"]["models"] >= 10      # 内置表确实带价
+    assert d["data"]["pricing_file"]["source"] != "env-file"
+    assert any("自定义定价文件不可用" in n for n in d["notes"])
     assert "需要注意:" in selfdoc.format_doctor(d)
+
+
+def test_doctor_when_pricing_fully_unavailable(monkeypatch):
+    """三层定价都读不到时才算问题，提示要指向 --update-pricing。"""
+    from codex_usage import pricing
+
+    monkeypatch.setattr(pricing, "load_pricing", lambda *a, **k: {})
+    monkeypatch.setattr(pricing, "source_info",
+                        lambda: {"source": "builtin", "path": None, "models": 0, "updated": None})
+    d = selfdoc.doctor()
+    assert any("定价不可用" in h and "--update-pricing" in h for h in d["hints"])
 
 
 def test_schema_documents_image_mode():

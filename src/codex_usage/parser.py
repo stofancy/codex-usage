@@ -166,14 +166,14 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                         rec.final_total = [t.get("input_tokens", 0),
                                            t.get("cached_input_tokens", 0),
                                            t.get("output_tokens", 0)]
-                    l = info.get("last_token_usage")
-                    if l:
+                    last = info.get("last_token_usage")
+                    if last:
                         slot = per_model[current_model]
                         slot[4] += 1                     # 一次 API 调用（轮次）
-                        slot[0] += max(0, l.get("input_tokens", 0))
-                        slot[1] += max(0, l.get("cached_input_tokens", 0))
-                        slot[2] += max(0, l.get("output_tokens", 0))
-                        slot[3] += max(0, l.get("reasoning_output_tokens", 0))
+                        slot[0] += max(0, last.get("input_tokens", 0))
+                        slot[1] += max(0, last.get("cached_input_tokens", 0))
+                        slot[2] += max(0, last.get("output_tokens", 0))
+                        slot[3] += max(0, last.get("reasoning_output_tokens", 0))
             except (json.JSONDecodeError, AttributeError, TypeError):
                 continue
     # 只保留有 token 消耗的模型槽位：calls 槽不计入，否则「无 turn_context + 零 token」

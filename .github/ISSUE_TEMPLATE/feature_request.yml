@@ -1,0 +1,65 @@
+name: Feature request
+description: Suggest a new feature or an improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues and discussions first.
+
+        This project has one hard constraint: it is **offline by default**, it only
+        **reads local files**, and charts are **never written to disk**. If your idea
+        needs to upload data, call a service at runtime, or write into the user's home
+        directory, explain how that constraint can still hold.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case / problem
+      description: What are you trying to do that the tool cannot do today? (Describe the problem, not just the solution.)
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should it look like - command, flags, output shape?
+      placeholder: |
+        Example: `codex-usage --by-day --export csv` to write a CSV to stdout for spreadsheets.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: How do you work around it today, and why is that not good enough?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI flags / output formats
+        - Aggregation and accounting semantics
+        - Table rendering
+        - Chart rendering (real image / half-cell / ASCII)
+        - Performance and large datasets
+        - Docs / engineering setup
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched the existing issues and found no duplicate
+          required: true
+        - label: I understand the tool is offline and read-only by default, and my proposal respects that
+          required: true

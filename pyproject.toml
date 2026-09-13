@@ -4,18 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-usage"
-version = "1.0.0"
-description = "Codex 本地用量统计：按会话/子代理/天/模型聚合，终端表格与图表"
+# 未做过正式发布，开源首发从 0.x 起步：允许在 1.0 之前做破坏性调整
+version = "0.1.0"
+description = "Local Codex usage analytics: token and cost breakdown by session, subagent, day and model, with terminal charts"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "stofancy" }]
-keywords = ["codex", "openai", "usage", "terminal", "cli", "token", "cost"]
+keywords = ["codex", "openai", "usage", "terminal", "cli", "token", "cost", "tui"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "Topic :: Utilities",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 dependencies = [
     "rich>=13.0",
@@ -32,12 +41,28 @@ image = [
 
 [project.urls]
 Homepage = "https://github.com/stofancy/codex-usage"
+Repository = "https://github.com/stofancy/codex-usage"
+Issues = "https://github.com/stofancy/codex-usage/issues"
+Changelog = "https://github.com/stofancy/codex-usage/blob/main/CHANGELOG.md"
 
 [project.scripts]
 codex-usage = "codex_usage.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/codex_usage"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src",
+    "tests",
+    "docs",
+    "tools",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

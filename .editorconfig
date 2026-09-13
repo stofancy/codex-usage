@@ -1,0 +1,33 @@
+# https://editorconfig.org
+# 让不同编辑器对换行、缩进、编码的处理保持一致。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+# Markdown 行尾双空格是「显式换行」，不能裁掉
+trim_trailing_whitespace = false
+indent_size = 2
+
+[*.{png,jpg,jpeg,gif,webp,ico}]
+# 二进制资源不做文本规范化
+charset = unset
+end_of_line = unset
+insert_final_newline = false
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

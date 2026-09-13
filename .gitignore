@@ -6,3 +6,18 @@ build/
 *.egg-info/
 .pytest_cache/
 .coverage
+
+# 本地临时工作区与工具缓存（不进版本库）
+.scratch/
+.dsh-*/
+.ruff_cache/
+.mypy_cache/
+.htmlcov/
+coverage.xml
+*.raw
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,104 @@
+name: CI
+
+# Run on every push and pull request; no branch filter, so renaming the default branch
+# cannot silently disable CI.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest · Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies (including the optional image extra)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[image]"
+          python -m pip install pytest
+
+      # The textual-image marker in pyproject.toml is python_version >= "3.12", so pip
+      # excludes it on 3.10 / 3.11. That is expected and is not an install failure;
+      # printing the status makes it obvious why the real-image tests are skipped.
+      - name: Show real-image dependency status
+        run: |
+          python -m pip show textual-image \
+            || echo "textual-image not installed (Python < 3.12, excluded by the pyproject marker - expected)"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      # The built-in pricing table ships inside the package. A packaging regression here
+      # would silently price everything at $0 for users without their own pricing file,
+      # so build the wheel once and assert the data file is inside it.
+      - name: Verify the wheel ships the bundled pricing table
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m pip install build
+          python -m build --wheel --outdir dist
+          python -c "import glob,sys,zipfile; \
+          w=glob.glob('dist/*.whl')[0]; \
+          names=zipfile.ZipFile(w).namelist(); \
+          hit=[n for n in names if n.endswith('codex_usage/data/pricing.json')]; \
+          sys.exit('pricing.json missing from ' + w) if not hit else print('wheel ships', hit[0])"
+
+  ruff:
+    name: ruff check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install ruff
+
+      - name: "ruff check (config: ruff.toml)"
+        run: ruff check .
+
+  mypy:
+    name: mypy src (informational until baseline is clean)
+    runs-on: ubuntu-latest
+    # mypy still reports findings on this tree and the baseline has not been burned down
+    # yet, so this job reports only. Remove the line below once the findings are fixed to
+    # turn it into a real gate.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mypy
+        run: python -m pip install mypy
+
+      - name: "mypy src (config: mypy.ini)"
+        run: mypy src
