@@ -299,7 +299,8 @@ def _read_pricing(path: str, *, builtin: bool = False) -> tuple[dict[str, dict],
 def _data_traversable(filename: str):
     """包内 data/ 资源（importlib.resources，兼容 zip 安装）。"""
     from importlib.resources import files
-    return files("codex_usage").joinpath("data", filename)
+    # 分两次 joinpath：Traversable.joinpath 的类型存根只接受单个参数，多参形式 mypy 报 call-arg。
+    return files("codex_usage").joinpath("data").joinpath(filename)
 
 
 def _read_data_file(filename: str, env_var: str):
