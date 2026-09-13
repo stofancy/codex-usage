@@ -1,5 +1,9 @@
 # codex-usage
 
+[![CI](https://github.com/stofancy/codex-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/stofancy/codex-usage/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 [English](README.md) · **中文**
 
 本地 Codex 用量统计：解析 `~/.codex/sessions` 的 rollout 会话文件，按 **会话 / 子代理 / 天 / 模型** 任意聚合，用终端表格（[rich](https://github.com/Textualize/rich)）或图表展示，并按模型折算成本。

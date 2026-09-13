@@ -74,8 +74,11 @@ def test_doctor_reports_environment(env):
     text = selfdoc.format_doctor(d)
     for section in ("会话数据", "归档数据", "定价", "图表渲染", "中文字体"):
         assert section in text
-    # CI 上没有中文字体，doctor 会给出字体提示：除它以外不该有告警
-    assert not [h for h in d["hints"] if "中文字体" not in h], d["hints"]
+    # 环境类提示按平台而异，不算问题：CI 无中文字体；3.10/3.11 上 textual-image 被
+    # pyproject marker 排除（需 Python ≥3.12），真图自然不可用。
+    env_hints = [h for h in d["hints"]
+                 if "中文字体" not in h and "真图图表不可用" not in h]
+    assert not env_hints, d["hints"]
 
 
 def test_doctor_reports_missing_sources(monkeypatch, tmp_path):

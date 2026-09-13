@@ -1,5 +1,9 @@
 # codex-usage
 
+[![CI](https://github.com/stofancy/codex-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/stofancy/codex-usage/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **English** · [中文](README.zh-CN.md)
 
 Local Codex usage statistics: parse the rollout session files under `~/.codex/sessions`, aggregate them by **session / subagent / day / model**, and view the result as terminal tables ([rich](https://github.com/Textualize/rich)) or charts, with per-model cost estimation.
