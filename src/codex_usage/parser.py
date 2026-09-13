@@ -118,7 +118,7 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
     if not uuids:
         return None
     rec = Session(file=path, sid=uuids[0], uuids=uuids)
-    per_model = defaultdict(lambda: [0, 0, 0, 0, 0])
+    per_model: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0])
     current_model = "unknown"
     try:
         fh = open(path, errors="replace")

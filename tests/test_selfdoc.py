@@ -70,7 +70,7 @@ def test_doctor_reports_environment(env):
     assert "env-file" in d["data"]["pricing_file"]["source"]   # 夹具的自定义表覆盖生效
     assert d["render"]["tier"]
     assert d["render"]["mode"] in ("auto", "tgp", "sixel", "halfcell", "ascii")
-    assert d["render"]["detected"]                       # 自动探测结果保留
+    assert "detected" in d["render"]                     # 自动探测结果保留（无 image extras 时为 None）
     text = selfdoc.format_doctor(d)
     for section in ("会话数据", "归档数据", "定价", "图表渲染", "中文字体"):
         assert section in text

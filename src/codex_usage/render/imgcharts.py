@@ -76,10 +76,12 @@ def _renderable():
     original, sink = sys.__stdout__, sys.stderr
     try:
         if original is not None and sink is not None:
-            sys.__stdout__ = _ProbeStdout(original, sink)
+            # textual-image 会往 stdout 打终端探测序列；这里临时换掉解释器的 __stdout__
+            # 把探测引到 stderr，避免污染 --json/--schema/--doctor 的 stdout 数据流。
+            sys.__stdout__ = _ProbeStdout(original, sink)   # type: ignore[misc]
         from textual_image import renderable
     finally:
-        sys.__stdout__ = original
+        sys.__stdout__ = original                           # type: ignore[misc]
     return renderable
 
 

@@ -89,12 +89,8 @@ jobs:
         run: ruff check .
 
   mypy:
-    name: mypy src (informational until baseline is clean)
+    name: mypy src
     runs-on: ubuntu-latest
-    # mypy still reports findings on this tree and the baseline has not been burned down
-    # yet, so this job reports only. Remove the line below once the findings are fixed to
-    # turn it into a real gate.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

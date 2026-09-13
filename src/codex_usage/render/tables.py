@@ -193,8 +193,8 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
 
         def label_row(note: str, r: Session | None, blank_id: bool = False):
             d, t = stats.fmt_dt(r) if r else ("", "")
-            tb.add_row(f"{d[5:]} {t}" if r else "",
-                       (r.parent or "?")[:13] if blank_id else (r.sid[:13] if r else ""),
+            ident = "" if r is None else ((r.parent or "?")[:13] if blank_id else r.sid[:13])
+            tb.add_row(f"{d[5:]} {t}" if r else "", ident,
                        _type_cell(r.type if r else None), Text(note, style="bold"))
 
         def model_agg_rows(members: list[Session]) -> list:
