@@ -114,7 +114,48 @@ python tools/sync_pricing.py --format raw --out /tmp/models.dev.json
    （`gpt-5.6-sol-yytoken` → `gpt-5.6-sol`）。为避免误配，只有**至少两段且长度 ≥4**
    的 key 才参与前缀匹配（`gpt` / `o3` 这类过泛 key 不参与）。
 
-## 5. 同步（公开渠道 → 用户缓存）
+## 5. cache_read 价缺失时的回退（保守上界）
+
+公开渠道对部分模型只登记 input/output 价，没有 cache read 价（`cost.cache_read` 缺失）。
+旧口径把这类模型的缓存读按 **$0/M** 计，会系统性低估成本；现在改为：
+
+| 情况 | 缓存读用的价格 |
+| --- | --- |
+| 表里有 cache read 价且 > 0 | 该 cache read 价（行为不变） |
+| 表里**没有** cache read 价 | **回退用该模型的 input 价** |
+| 表里 cache read 价**显式为 0** | **回退用该模型的 input 价**（0 视为“未登记”，不是“免费”） |
+| 记录缺 input 价（缺失 / `null` / 负数） | 整行视为无定价 → 成本 `$0.00*` |
+
+**为什么回退到 input 价（上界）而不是 $0**：真实 cache read 价通常只有 input 价的
+~10%（如 `gpt-5.6-sol`：input 4 / cache_read 0.4），按 input 计只会**多算、不会少算**；
+按 $0 计则一定少算。诊断口径与 ccusage 的「cached input 用 cache-read 价、缺失时回退
+input 价」一致，便于对账。代价是这类模型成本偏高，需要精确值请在自己的
+`CODEX_USAGE_PRICING_FILE` 里补 `cacheReadCostPerMillion`。
+
+**怎么看出“这一行用了回退”**：`model_cost()` 的返回保持不变，新增明细接口
+
+```python
+from codex_usage import pricing
+
+detail = pricing.model_cost_detail(pricing.load_pricing(), "gpt-5-pro", 1_000_000, 1_000_000, 0)
+# {"model": "gpt-5-pro", "matched": "gpt-5-pro", "cost_usd": 30.0,
+#  "fallbacks": ["cacheReadCostPerMillion"]}     ← 空列表 = 完全按表内价格
+```
+
+`fallbacks` 只会在该行**价格层面**发生回退时非空（即使该行 cache read tokens 为 0，
+也会标记，便于诊断；此时不影响金额）。未命中定价返回 `None`。
+
+**覆盖缺口量级（2026-09-13 快照）**：内置表 2086 条中 **717 条（34.4%）**没有 cache
+read 价；叠加用户层后的生效合并表 2329 条中 **783 条（33.6%）**。典型缺口是官方只给
+input/output 的推理档：`gpt-5-pro`、`gpt-5.2-pro`、`gpt-5.5-pro`、`o1-pro`、
+`gpt-4-turbo`、`gpt-4o-2024-05-13`。
+
+**实测影响**：本机 `--since 20260911` 的 126 个会话，旧口径 **$1,062.11** → 新口径
+**$1,062.11**，增量 **$0.00（0.000%）**——该批数据用到的模型（`gpt-5.6-sol/luna/terra`、
+`gpt-6-astra`、`deepseek-v4-*` 等）都有 cache read 价，所以回退只在用到 pro 系列等
+缺价模型时才会体现。
+
+## 6. 同步（公开渠道 → 用户缓存）
 
 ```python
 from codex_usage import pricing
@@ -128,19 +169,21 @@ pricing.sync("litellm", timeout=30.0)
 - CLI 里由 `codex-usage --update-pricing [--pricing-source litellm]` 调用并捕获异常。
 - 缓存目录可用 `CODEX_USAGE_CACHE_DIR` 覆盖（测试与容器场景）。
 
-## 6. 与 cc-switch 的关系
+## 7. 与 cc-switch 的关系
 
 cc-switch 的 `~/.cc-switch/model-pricing.json` 仍是**最高优先级的覆盖层**：用户已有该文件时，
 它的每一条同名定价都会覆盖内置表；内置表继续提供它没有的公开模型（这正是避免“旧 cc-switch
 文件让新模型全部无价”的关键）。`sync` 写出的用户缓存格式与 cc-switch 兼容，可双向复制。
 
-## 7. 已知局限
+## 8. 已知局限
 
 - **转售商价格差异**：同一个模型在不同 provider/中转站价格不同。内置表按权威度取一条，
   不能反映用户实际走的渠道加价；需要精确账单请把自己的 cc-switch 表放进
   `CODEX_USAGE_PRICING_FILE`（同名项会覆盖内置价）。
 - **未计价格档位**：渠道的 context 阶梯价（`tiers` / `context_over_200k`）、
   `cache_write`（缓存写）、priority/flex 档均未纳入，成本按首档基础价估算。
+- **cache read 回退是上界**：缺 cache read 价的模型按 input 价计（见第 5 节），会高估
+  这些模型的成本；这是“宁多算不少算”的取舍，精确值可在自己的定价表里补。
 - **快照时效**：内置表是生成时点的快照（见文件里的 `updated`），新模型可能缺价；
   无定价的模型 token 照常统计、成本显示 `$0.00*` 并在表尾提示。
 - **公开渠道没有的名字才不会算价**：内置表只来自 models.dev / LiteLLM 的公开数据；

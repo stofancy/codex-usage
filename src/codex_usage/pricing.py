@@ -136,21 +136,27 @@ def _prefix_lookup(pricing: dict, normalized: str) -> str | None:
     return best
 
 
-def lookup(pricing: dict[str, dict], model: str) -> dict | None:
-    """按 精确 → 归一化 → 前缀 三档查找价格记录；找不到返回 None。"""
+def _lookup_hit(pricing: dict[str, dict], model: str) -> tuple[str, dict] | None:
+    """按 精确 → 归一化 → 前缀 三档查找 → (命中的表 key, 价格记录)；找不到返回 None。"""
     if not pricing or not model:
         return None
     hit = pricing.get(model)
     if hit is not None:
-        return hit
+        return model, hit
     n = normalize_model(model)
     if not n:
         return None
     hit = pricing.get(n)
     if hit is not None:
-        return hit
+        return n, hit
     key = _prefix_lookup(pricing, n)
-    return pricing[key] if key else None
+    return (key, pricing[key]) if key else None
+
+
+def lookup(pricing: dict[str, dict], model: str) -> dict | None:
+    """按 精确 → 归一化 → 前缀 三档查找价格记录；找不到返回 None。"""
+    hit = _lookup_hit(pricing, model)
+    return hit[1] if hit else None
 
 
 # ---------------------------------------------------------------- 文件读取
@@ -302,21 +308,61 @@ def load_pricing(path: str | None = None) -> dict[str, dict]:
     return _resolve(path)[0]
 
 
+def model_cost_detail(pricing: dict[str, dict], model: str,
+                      net_in: int, cached: int, out: int) -> dict | None:
+    """`model_cost` 的明细版：成本 + 命中的定价 key + 本行用到的价格回退。
+
+    返回 ``{"model", "matched", "cost_usd", "fallbacks"}``；无定价返回 None。
+
+    ``fallbacks`` 是回退字段名列表（空列表 = 完全按表内价格）：
+
+    - ``"cacheReadCostPerMillion"``：表里**没有** cache read 价**或显式为 0** 时，
+      缓存读按 input 价计（保守上界，宁多算不少算；ccusage 同口径）。缓存读为 0
+      tokens 时也会标记，便于诊断“这一行用了回退”，但此时不影响金额。
+    - input 价缺失/非法/为负 → 整行视为无定价，返回 None（与 ``model_cost`` 一致）。
+    - output 价缺失/非法/为负 → 按 0 计；``net_in``/``cached``/``out`` 为负按 0 计，
+      因此成本永不为负。
+    """
+    hit = _lookup_hit(pricing, model)
+    if hit is None:
+        return None
+    key, record = hit
+    input_price = _as_price(record.get("inputCostPerMillion"))
+    if input_price is None:                      # 缺 input 价 = 无定价
+        return None
+    fallbacks: list[str] = []
+    cache_price = _as_price(record.get("cacheReadCostPerMillion"))
+    if not cache_price:                          # None 或 0 → 回退 input 价
+        cache_price = input_price
+        fallbacks.append("cacheReadCostPerMillion")
+    output_price = _as_price(record.get("outputCostPerMillion")) or 0.0
+    cost = (max(0, net_in) * input_price
+            + max(0, cached) * cache_price
+            + max(0, out) * output_price) / 1e6
+    return {"model": model, "matched": key, "cost_usd": cost, "fallbacks": fallbacks}
+
+
 def model_cost(pricing: dict[str, dict], model: str, net_in: int, cached: int, out: int) -> float | None:
-    """单模型成本（USD）；无定价模型返回 None（调用方按 $0 计并标注 *）。"""
-    p = lookup(pricing, model)
-    if not p:
-        return None
+    """单模型成本（USD）；无定价模型返回 None（调用方按 $0 计并标注 *）。
 
-    def per_million(key: str) -> float:
-        return float(p.get(key) or 0)
+    需要区分“缓存读价回退到 input 价”时用 ``model_cost_detail()``。
+    """
+    detail = model_cost_detail(pricing, model, net_in, cached, out)
+    return detail["cost_usd"] if detail else None
 
-    try:
-        return (net_in * per_million("inputCostPerMillion")
-                + cached * per_million("cacheReadCostPerMillion")
-                + out * per_million("outputCostPerMillion")) / 1e6
-    except Exception:
-        return None
+
+def cache_read_coverage(pricing: dict[str, dict]) -> dict:
+    """cache read 价覆盖统计（供 ``--doctor`` 诊断回退影响）。
+
+    缺价（缺失或显式 0）的条目在计费时会回退 input 价：::
+
+        {"models": 2086, "cache_read_missing": 717, "cache_read_missing_pct": 34.4}
+    """
+    total = len(pricing)
+    missing = sum(1 for row in pricing.values()
+                  if not _as_price(row.get("cacheReadCostPerMillion")))
+    return {"models": total, "cache_read_missing": missing,
+            "cache_read_missing_pct": round(missing * 100 / total, 1) if total else 0.0}
 
 
 def source_info() -> dict:

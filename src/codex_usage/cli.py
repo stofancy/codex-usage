@@ -104,6 +104,14 @@ def _emit_json(recs, pricing):
             "calls": stats.rec_calls(r),
             "cost_usd_known": round(cost, 4), "pricing_full": known,
             "last_cumulative_total": r.final_total,
+            # 计量口径诊断：累计值回落（压缩重置）次数、缺累计回退次数、旧口径对照值
+            "metering": {"resets": r.resets, "fallbacks": r.fallbacks,
+                         "delta_sum": r.delta_sum},
+            # 档位明细（thread_settings_applied 的 service_tier），供核对 priority/Fast 倍率
+            "tiers": {m: {t: {"input_gross": s[0], "cached": s[1], "output": s[2],
+                              "reasoning": s[3], "calls": s[4]}
+                          for t, s in ts.items()}
+                      for m, ts in r.tiers.items()},
         }, ensure_ascii=False))
 
 

@@ -69,6 +69,15 @@ _CONVENTIONS = {
                           "--model", "--archived"],
                 "note": "只缩小范围，不改变行粒度；--type 可取值见 enums.type"},
     "default_window": "今天 00:00:00 ~ 23:59:59（本地时区）",
+    "metering": {"note": "token 用量按 token_count 的 total_token_usage 累计值增量计，"
+                         "按当时 turn_context 的模型归因；首帧若整块是继承的父线程历史"
+                         "（last 为 0）则不计；重复事件（累计值不变）不重计；累计值回落"
+                         "（上下文压缩重置）或缺累计值时回退 last_token_usage",
+                 "diagnostics": "见 --json 的 metering 字段（resets/fallbacks/delta_sum）"},
+    "tiers": {"note": "thread_settings_applied 的 service_tier 决定档位（default/priority/fast，"
+                      "从未出现过则 unknown）；--json 的 tiers 给出按模型×档位的用量，"
+                      "便于核对倍率定价",
+              "source": "thread_settings_applied.payload.thread_settings.service_tier"},
     "conflicts": ["--chart 不能与 --family 组合",
                   "--chart pie 不能与 --by-day 组合（饼图只按模型）",
                   "--json 优先于 --chart"],
@@ -96,6 +105,11 @@ _JSON_FIELDS = {
     "cost_usd_known": {"type": "number", "unit": "USD", "meaning": "按定价折算的成本（无定价按 0）"},
     "pricing_full": {"type": "boolean", "meaning": "是否所有模型都有定价"},
     "last_cumulative_total": {"type": "array|null", "meaning": "[毛输入, 缓存读, 输出] 的文件末累计值（仅参考）"},
+    "metering": {"type": "object", "meaning": "{resets, fallbacks, delta_sum}：累计值回落"
+                                              "（压缩重置）次数、缺累计回退次数、旧口径"
+                                              "（逐轮 last_token_usage 累加）对照值"},
+    "tiers": {"type": "object", "meaning": "按模型 × 档位（default|priority|fast|unknown）的用量，"
+                                           "槽位同 model_fields；各档求和等于该模型总量"},
 }
 
 _MODEL_FIELDS = {

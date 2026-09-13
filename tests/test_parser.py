@@ -1,5 +1,7 @@
-"""解析器单元测试：会话 ID 规则、父子归属、分页合并、时间窗口、时间参数格式。"""
+"""解析器单元测试：会话 ID 规则、父子归属、分页合并、时间窗口、时间参数格式、计量口径。"""
 
+import json
+import os
 from datetime import datetime
 
 import pytest
@@ -127,3 +129,135 @@ def test_archive_included_when_given(env):
     assert env["ids"]["arch"] in {r.sid for r in recs}
     recs2 = collect(env["sessions"], datetime(2026, 9, 9), datetime(2026, 9, 11, 23, 59, 59))
     assert env["ids"]["arch"] not in {r.sid for r in recs2}
+
+
+# ---------------------------------------------------------------- 计量口径（累计差分）
+
+UID = "01a09a5f-a44e-75e1-ba40-000000000001"
+TS = "2026-09-11T01:00:00.000Z"
+
+
+def _meta(uid=UID, thread_source="user"):
+    return json.dumps({"timestamp": TS, "type": "session_meta",
+                       "payload": {"session_id": uid, "id": uid, "cwd": "/tmp/p",
+                                   "thread_source": thread_source, "source": "vscode"}})
+
+
+def _turn(model):
+    return json.dumps({"timestamp": TS, "type": "turn_context", "payload": {"model": model}})
+
+
+def _settings(tier):
+    return json.dumps({"timestamp": TS, "type": "event_msg",
+                       "payload": {"type": "thread_settings_applied",
+                                   "thread_settings": {"service_tier": tier}}})
+
+
+def _usage(inp, cached, out, reasoning=0):
+    return {"input_tokens": inp, "cached_input_tokens": cached,
+            "output_tokens": out, "reasoning_output_tokens": reasoning}
+
+
+def _tok(total=None, last=None):
+    info = {}
+    if total is not None:
+        info["total_token_usage"] = total
+    if last is not None:
+        info["last_token_usage"] = last
+    return json.dumps({"timestamp": TS, "type": "event_msg",
+                       "payload": {"type": "token_count", "info": info}})
+
+
+def _write(path, *lines):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n")
+    return str(path)
+
+
+def _rollout(tmp_path, *lines, name=f"rollout-2026-09-11T09-00-00-{UID}.jsonl"):
+    return _write(tmp_path / "2026" / "09" / "11" / name, *lines)
+
+
+def test_repeated_token_event_counted_once(tmp_path):
+    """重复事件（累计值与 last 都相同）只计一次——旧口径会把 last 累加两次。"""
+    path = _rollout(tmp_path, _meta(), _turn("gpt-x"),
+                    _tok(_usage(100, 0, 10), _usage(100, 0, 10)),
+                    _tok(_usage(100, 0, 10), _usage(100, 0, 10)))     # 完全重复
+    rec = parse_rollout(path)
+    assert rec is not None
+    assert rec.models["gpt-x"][0] == 100 and rec.models["gpt-x"][2] == 10
+    assert rec.models["gpt-x"][4] == 1                                # calls 只算一次
+    assert rec.delta_sum == 220                                       # 旧口径对照保留
+
+
+def test_inherited_first_snapshot_not_counted(tmp_path):
+    """首帧整块是继承的父线程历史（last 全 0）时不能算进来。
+
+    真实案例：某子代理文件首帧 total=14,051,760 而 last=0，旧口径记 235,038、
+    不加判定会把整块 14M 记成它的用量。
+    """
+    path = _rollout(tmp_path, _meta(), _turn("gpt-x"),
+                    _tok(_usage(14_000_000, 0, 51_760), _usage(0, 0, 0)),
+                    _tok(_usage(14_010_000, 0, 52_000), _usage(10_000, 0, 240)))
+    rec = parse_rollout(path)
+    assert rec.models["gpt-x"][0] == 10_000
+    assert rec.models["gpt-x"][2] == 240
+
+
+def test_middle_jump_capped_by_last(tmp_path):
+    """中间累计值跳升远超本轮 last（插入继承历史）时，以 last 封顶，不虚高。"""
+    path = _rollout(tmp_path, _meta(), _turn("gpt-x"),
+                    _tok(_usage(1_000, 0, 100), _usage(1_000, 0, 100)),
+                    _tok(_usage(9_000_000, 0, 900_000), _usage(1_000, 0, 100)))
+    rec = parse_rollout(path)
+    assert rec.models["gpt-x"][0] == 2_000
+    assert rec.models["gpt-x"][2] == 200
+
+
+def test_cumulative_drop_falls_back_to_last(tmp_path):
+    """上下文压缩让累计值回落时，该轮用 last_token_usage 并计数。"""
+    path = _rollout(tmp_path, _meta(), _turn("gpt-x"),
+                    _tok(_usage(100, 0, 10), _usage(100, 0, 10)),
+                    _tok(_usage(60, 0, 6), _usage(60, 0, 6)))
+    rec = parse_rollout(path)
+    assert rec.resets == 1
+    assert rec.models["gpt-x"][0] == 160 and rec.models["gpt-x"][2] == 16
+
+
+def test_missing_total_falls_back_to_last(tmp_path):
+    """缺 total_token_usage 时回退 last，不丢数据。"""
+    path = _rollout(tmp_path, _meta(), _turn("gpt-x"),
+                    _tok(None, _usage(500, 0, 50)),
+                    _tok(None, _usage(300, 0, 30)))
+    rec = parse_rollout(path)
+    assert rec.fallbacks == 2
+    assert rec.models["gpt-x"][0] == 800 and rec.models["gpt-x"][2] == 80
+
+
+def test_tier_split_sums_back_to_model_totals(tmp_path):
+    """thread_settings_applied 的档位单列，且各档合计等于模型总量（不变式）。"""
+    path = _rollout(tmp_path, _meta(), _turn("gpt-x"),
+                    _tok(_usage(100, 0, 10), _usage(100, 0, 10)),      # 未知档
+                    _settings("priority"),
+                    _tok(_usage(300, 0, 30), _usage(200, 0, 20)),      # Fast 档
+                    _settings("default"),
+                    _tok(_usage(600, 0, 60), _usage(300, 0, 30)))      # 标准档
+    rec = parse_rollout(path)
+    assert set(rec.tiers["gpt-x"]) == {"unknown", "priority", "default"}
+    assert rec.tiers["gpt-x"]["priority"][0] == 200
+    assert rec.tiers["gpt-x"]["default"][0] == 300
+    for i in range(5):
+        assert sum(t[i] for t in rec.tiers["gpt-x"].values()) == rec.models["gpt-x"][i]
+
+
+def test_archived_duplicate_not_double_counted(tmp_path):
+    """sessions/ 与 archived_sessions/ 同名（同 UUID）时以 sessions/ 为准，不累加两次。"""
+    name = f"rollout-2026-09-11T09-00-00-{UID}.jsonl"
+    body = (_meta(), _turn("gpt-x"), _tok(_usage(100, 0, 10), _usage(100, 0, 10)))
+    active = _write(tmp_path / "sessions" / "2026" / "09" / "11" / name, *body)
+    _write(tmp_path / "archived" / name, *body)
+    recs = collect(str(tmp_path / "sessions"), datetime(2026, 9, 11), datetime(2026, 9, 11, 23, 59, 59),
+                   archive_dir=str(tmp_path / "archived"))
+    assert len(recs) == 1
+    assert recs[0].models["gpt-x"][0] == 100          # 没有被累加成 200
+    assert os.path.dirname(recs[0].file) == os.path.dirname(active)

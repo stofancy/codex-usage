@@ -36,6 +36,14 @@ class Session:
     cwd: str | None = None
     # model -> [gross_in, cached, out, reasoning, calls]
     models: dict[str, list[int]] = field(default_factory=dict)
+    # model -> 计量档位（thread_settings_applied 的 service_tier 原值；没出现过则 "unknown"）
+    #         -> [gross_in, cached, out, reasoning, calls]，用于 priority/Fast 档倍率定价
+    tiers: dict[str, dict[str, list[int]]] = field(default_factory=dict)
+    # 旧口径（逐轮 last_token_usage 累加，毛输入+输出）对照值：与累计差分交叉校验
+    delta_sum: int = 0
+    # 诊断：累计值下降（上下文压缩重置）次数、缺 total_token_usage 回退次数
+    resets: int = 0
+    fallbacks: int = 0
     first_local: datetime | None = None
     last_local: datetime | None = None
     final_total: list[int] | None = None
@@ -112,14 +120,33 @@ def parse_time_arg(s: str, end: bool = False) -> datetime:
     raise SystemExit(f"无法解析时间: {s}（支持 2026-09-12[ 16:10[:23]] 或 20260912[-16[10[23]]]）")
 
 
+def _token(d, key: str) -> int:
+    """从 token 分量字典里取非负整数（缺失/None/非数字都按 0）。"""
+    try:
+        return max(0, int(d.get(key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) -> Session | None:
-    """解析单个 rollout 文件；window 内无消耗的会话返回 None。"""
+    """解析单个 rollout 文件；window 内无消耗的会话返回 None。
+
+    计量口径：以 `token_count.payload.info.total_token_usage` 的**增量**为准
+    （当前累计 − 上一累计），按当时 `turn_context` 的模型归因。这样：
+      * 重复事件/重放的父历史前缀增量为 0，天然不重复计数（实测同一文件里
+        逐轮 last 累加会比最终累计高 10.1%，53% 的文件存在重复累计值）；
+      * 上下文压缩导致累计值下降时，该轮回退用 last_token_usage；
+      * 缺 total_token_usage 时同样回退 last_token_usage，不丢数据。
+    `last_token_usage` 的累加值保留在 `delta_sum` 供交叉校验。
+    """
     uuids = UUID_RE.findall(os.path.basename(path))
     if not uuids:
         return None
     rec = Session(file=path, sid=uuids[0], uuids=uuids)
     per_model: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0])
+    prev_total: list[int] | None = None          # 上一事件的累计快照
     current_model = "unknown"
+    current_tier = "unknown"                     # 没有任何 thread_settings 时按 unknown
     try:
         fh = open(path, errors="replace")
     except OSError:
@@ -148,6 +175,15 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                     mm = json.loads(line).get("payload", {}).get("model")
                     if mm:
                         current_model = mm
+                elif '"thread_settings_applied"' in tag:
+                    # 每次线程设置变更带 service_tier（default / priority / fast …）；
+                    # 顺带用其中的 model 兜底 turn_context 缺失的会话。
+                    st = (json.loads(line).get("payload", {}) or {}).get("thread_settings") or {}
+                    tier = st.get("service_tier")
+                    if tier:
+                        current_tier = str(tier)
+                    if st.get("model") and current_model == "unknown":
+                        current_model = st["model"]
                 elif '"token_count"' in tag:
                     obj = json.loads(line)
                     info = obj.get("payload", {}).get("info") or {}
@@ -161,19 +197,50 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                             rec.first_local = tl
                         if rec.last_local is None or tl > rec.last_local:
                             rec.last_local = tl
-                    t = info.get("total_token_usage")
-                    if t:
-                        rec.final_total = [t.get("input_tokens", 0),
-                                           t.get("cached_input_tokens", 0),
-                                           t.get("output_tokens", 0)]
-                    last = info.get("last_token_usage")
-                    if last:
+                    last_obj = info.get("last_token_usage")
+                    last_u = last_obj or {}
+                    last_v = [_token(last_u, "input_tokens"), _token(last_u, "cached_input_tokens"),
+                              _token(last_u, "output_tokens"),
+                              _token(last_u, "reasoning_output_tokens")]
+                    if last_v[0] or last_v[2]:                  # 旧口径对照（毛输入 + 输出）
+                        rec.delta_sum += last_v[0] + last_v[2]
+                    total = info.get("total_token_usage")
+                    if total:
+                        cur = [_token(total, "input_tokens"), _token(total, "cached_input_tokens"),
+                               _token(total, "output_tokens"),
+                               _token(total, "reasoning_output_tokens")]
+                        rec.final_total = cur[:3]
+                        if prev_total is None:
+                            # 首帧累计值可能整块是**继承的父线程历史**（实测有文件首帧
+                            # 14,051,760 而 last 全 0）：只计它自己的增量，否则会虚高数十倍。
+                            delta = last_v if last_obj is not None else cur
+                        else:
+                            inc = [c - p for c, p in zip(cur, prev_total)]
+                            if any(x < 0 for x in inc):
+                                rec.resets += 1                 # 压缩重置：累计值回落
+                                delta = (last_v if last_obj is not None
+                                         else [max(0, x) for x in inc])
+                            elif last_obj is not None and any(last_v):
+                                # 正常帧「累计增量 == last」；跳升远大于 last 说明中间插入了
+                                # 继承历史，用 last 封顶（分量为 0 时仍取增量，不少算）。
+                                delta = [min(max(0, x), cap) if cap else max(0, x)
+                                         for x, cap in zip(inc, last_v)]
+                            else:
+                                delta = [max(0, x) for x in inc]
+                        prev_total = cur
+                    else:
+                        rec.fallbacks += 1                       # 缺累计值：回退逐轮增量
+                        delta = last_v
+                    if any(delta):
                         slot = per_model[current_model]
-                        slot[4] += 1                     # 一次 API 调用（轮次）
-                        slot[0] += max(0, last.get("input_tokens", 0))
-                        slot[1] += max(0, last.get("cached_input_tokens", 0))
-                        slot[2] += max(0, last.get("output_tokens", 0))
-                        slot[3] += max(0, last.get("reasoning_output_tokens", 0))
+                        slot[4] += 1                             # 一次 API 调用（有效轮次）
+                        for i in range(4):
+                            slot[i] += max(0, delta[i])
+                        tslot = rec.tiers.setdefault(current_model, {}).setdefault(
+                            current_tier, [0, 0, 0, 0, 0])
+                        tslot[4] += 1
+                        for i in range(4):
+                            tslot[i] += max(0, delta[i])
             except (json.JSONDecodeError, AttributeError, TypeError):
                 continue
     # 只保留有 token 消耗的模型槽位：calls 槽不计入，否则「无 turn_context + 零 token」
@@ -199,7 +266,13 @@ def collect(sessions_dir: str, since: datetime, until: datetime,
     for day in days:
         paths += glob.glob(os.path.join(sessions_dir, day, "rollout-*.jsonl"))
     if archive_dir:
-        paths += glob.glob(os.path.join(archive_dir, "rollout-*.jsonl"))
+        # sessions/ 与 archived_sessions/ 可能同时保存同一会话（文件名 UUID 相同）：
+        # 以 sessions/ 为准，否则按 sid 合并会把同一份用量累加两次。
+        active_keys = {tuple(UUID_RE.findall(os.path.basename(p))) for p in paths}
+        for p in glob.glob(os.path.join(archive_dir, "rollout-*.jsonl")):
+            if tuple(UUID_RE.findall(os.path.basename(p))) in active_keys:
+                continue
+            paths.append(p)
     recs = []
     for p in sorted(set(paths)):
         r = parse_rollout(p, window=(since, until))

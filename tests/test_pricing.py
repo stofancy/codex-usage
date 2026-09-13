@@ -216,6 +216,92 @@ def test_model_cost_accepts_string_prices():
     assert pricing.model_cost(table, "gpt-5.6-luna", 1_000_000, 0, 0) == pytest.approx(10.0)
 
 
+# ---------------------------------------------------------------- cache_read 价回退
+
+
+def test_cache_read_falls_back_to_input_when_missing():
+    """表里没有 cache read 价 → 缓存读按 input 价计（保守上界），并可在明细里看出来。"""
+    table = {"m": {"inputCostPerMillion": 10, "outputCostPerMillion": 20}}
+    assert pricing.model_cost(table, "m", 1_000_000, 1_000_000, 0) == pytest.approx(20.0)
+    detail = pricing.model_cost_detail(table, "m", 1_000_000, 1_000_000, 0)
+    assert detail["matched"] == "m"
+    assert detail["cost_usd"] == pytest.approx(20.0)
+    assert detail["fallbacks"] == ["cacheReadCostPerMillion"]
+
+
+def test_cache_read_falls_back_when_explicit_zero():
+    """显式 cache read = 0（含 cc-switch 字符串写法）同样回退到 input 价。"""
+    table = {"m": {"inputCostPerMillion": "10", "cacheReadCostPerMillion": "0",
+                   "outputCostPerMillion": "20"}}
+    assert pricing.model_cost(table, "m", 0, 1_000_000, 0) == pytest.approx(10.0)
+    detail = pricing.model_cost_detail(table, "m", 0, 1_000_000, 0)
+    assert detail["fallbacks"] == ["cacheReadCostPerMillion"]
+
+
+def test_cache_read_price_is_used_when_present():
+    """cache read 价正常时行为不变，也不算“用了回退”。"""
+    table = {"m": {"inputCostPerMillion": 10, "cacheReadCostPerMillion": 1,
+                   "outputCostPerMillion": 20}}
+    assert pricing.model_cost(table, "m", 1_000_000, 1_000_000, 0) == pytest.approx(11.0)
+    assert pricing.model_cost_detail(table, "m", 1_000_000, 1_000_000, 0)["fallbacks"] == []
+
+
+def test_missing_input_price_is_unpriced():
+    """缺 input 价（缺失 / None / 负数）→ 整行无定价，返回 None。"""
+    for row in ({"outputCostPerMillion": 20, "cacheReadCostPerMillion": 1},
+                {"inputCostPerMillion": None, "outputCostPerMillion": 20},
+                {"inputCostPerMillion": -1, "outputCostPerMillion": 20}):
+        table = {"m": row}
+        assert pricing.model_cost(table, "m", 1_000_000, 1_000_000, 1_000_000) is None
+        assert pricing.model_cost_detail(table, "m", 1_000_000, 1_000_000, 1_000_000) is None
+
+
+def test_zero_and_negative_components_never_negative():
+    """任一分量为 0 不出异常；负分量按 0 计，成本不为负。"""
+    table = {
+        "fallback": {"inputCostPerMillion": 10, "outputCostPerMillion": 20},
+        "normal": {"inputCostPerMillion": 10, "cacheReadCostPerMillion": 1, "outputCostPerMillion": 20},
+    }
+    for model in table:
+        assert pricing.model_cost(table, model, 0, 0, 0) == 0.0
+        cost = pricing.model_cost(table, model, -10, -10, -10)
+        assert cost == 0.0 and cost >= 0
+
+
+def test_model_cost_detail_matches_model_cost_and_reports_match():
+    table = {"gpt-5.6-sol": {"inputCostPerMillion": 4, "outputCostPerMillion": 20}}
+    detail = pricing.model_cost_detail(table, "gpt-5.6-sol-yytoken", 0, 1_000_000, 0)
+    assert detail["matched"] == "gpt-5.6-sol"                    # 前缀兜底命中的表内 key
+    assert detail["cost_usd"] == pytest.approx(4.0)              # 回退 input 价
+    assert detail["cost_usd"] == pricing.model_cost(table, "gpt-5.6-sol-yytoken", 0, 1_000_000, 0)
+    assert pricing.model_cost_detail(table, "unknown", 1, 1, 1) is None
+
+
+def test_builtin_table_has_cache_read_gap():
+    """内置表确实存在 cache read 覆盖缺口（回退规则的前提），但不是全局缺失。"""
+    raw = json.loads(importlib.resources.files("codex_usage").joinpath(
+        "data", "pricing.json").read_text(encoding="utf-8"))
+    rows = raw["models"]
+    missing = [r for r in rows if not (r.get("cacheReadCostPerMillion") or 0)]
+    assert 0 < len(missing) < len(rows)
+    # 典型缺口：pro 系列官方只给 input/output
+    ids = {r["modelId"] for r in missing}
+    assert {"gpt-5-pro", "gpt-5.2-pro"} & ids
+
+
+def test_cache_read_coverage_counts_fallbacks():
+    table = {
+        "no-cache": {"inputCostPerMillion": 1, "outputCostPerMillion": 2},
+        "zero-cache": {"inputCostPerMillion": 1, "cacheReadCostPerMillion": 0,
+                       "outputCostPerMillion": 2},
+        "has-cache": {"inputCostPerMillion": 1, "cacheReadCostPerMillion": 0.1,
+                      "outputCostPerMillion": 2},
+    }
+    assert pricing.cache_read_coverage(table) == {
+        "models": 3, "cache_read_missing": 2, "cache_read_missing_pct": 66.7}
+    assert pricing.cache_read_coverage({})["models"] == 0
+
+
 # ---------------------------------------------------------------- 合并加载与回退
 
 
