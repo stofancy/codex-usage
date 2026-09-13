@@ -235,6 +235,10 @@ def doctor() -> dict:
     n_archive, _ = _count_rollouts(archive) if os.path.isdir(archive) else (0, None)
     table = pricing.load_pricing()          # 无参：走完整优先级（自定义 > 缓存 > 内置），不是"只读指定文件"
     price_src = pricing.source_info()
+    try:
+        price_cov = pricing.cache_read_coverage(table)   # 表级缺口：缓存读价缺失比例
+    except Exception:
+        price_cov = {}
     render = imgcharts.describe()
 
     hints, notes = [], []
@@ -276,6 +280,8 @@ def doctor() -> dict:
                              "source": price_src.get("source"),
                              "loaded_from": price_src.get("path"),
                              "layers": price_src.get("layers"),
+                             "cache_read_missing": price_cov.get("cache_read_missing"),
+                             "cache_read_missing_pct": price_cov.get("cache_read_missing_pct"),
                              "updated": price_src.get("updated")},
         },
         "render": {**render, "stdout_is_tty": sys.stdout.isatty(),
@@ -321,7 +327,9 @@ def format_doctor(d: dict) -> str:
              f"，{data['archive_dir']['rollout_files']} 个 rollout 文件",
              f"定价       {src_label} {price.get('loaded_from') or price['path'] or '(未读取)'}，"
              f"{price['models']} 个模型"
-             + (f"（数据 {price['updated'][:10]}）" if price.get("updated") else ""),
+             + (f"（数据 {price['updated'][:10]}）" if price.get("updated") else "")
+             + (f"，其中 {price['cache_read_missing_pct']}% 缺缓存读价（按 input 价回退）"
+                if price.get("cache_read_missing") else ""),
              f"图表渲染   {render['tier']}{detail}",
              f"中文字体   {render['cjk_font'] or '未找到'}"]
     if d["hints"]:
