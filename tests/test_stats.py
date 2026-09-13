@@ -107,3 +107,21 @@ def test_rec_cost_falls_back_when_no_tiers():
     rec.models = {"gpt-6-astra": [1000, 0, 100, 0, 1]}
     cost, known = stats.rec_cost(rec, pricing)
     assert known and cost > 0
+
+
+def test_raw_session_filter_matches_any_uuid(env):
+    """`--raw --session <首 UUID>` 必须也能命中分页续页（续页 sid 取末位 UUID）。
+
+    实测分页会话占窗口用量 7.88%，此前 raw 模式用 --session 只看得到第一页。
+    """
+    from datetime import datetime
+    from codex_usage.parser import collect
+    from codex_usage import stats
+
+    raw = collect(env["sessions"], datetime(2026, 9, 10), datetime(2026, 9, 11, 23, 59, 59),
+                  raw=True)
+    pages = [r for r in raw if env["ids"]["page"] in r.uuids]
+    assert len(pages) >= 2, "夹具应含分页续页"
+    first_uid = pages[0].uuids[0]
+    hit = stats.apply_filters(raw, session=first_uid)
+    assert {r.file for r in hit} >= {r.file for r in pages}   # 两页都要命中

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "codex-usage"
 # 未做过正式发布，开源首发从 0.x 起步：允许在 1.0 之前做破坏性调整
-version = "0.2.0"
+version = "0.2.1"
 description = "Local Codex usage analytics: token and cost breakdown by session, subagent, day and model, with terminal charts"
 readme = "README.md"
 requires-python = ">=3.10"

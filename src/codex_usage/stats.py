@@ -100,11 +100,16 @@ def apply_filters(recs: list[Session], *, typ: str | None = None, session: str |
     if typ:
         recs = [r for r in recs if r.type == typ]
     if session:
+        # 会话行（合并后）的 sid 是线程本体；`--raw` 下每页的 sid 取文件名末位 UUID，
+        # 所以过滤要同时认文件名里的任意 UUID，否则 `--raw --session <首 UUID>`
+        # 选不到分页续页（实测分页会话占窗口用量 7.88%）。
+        def _hit(r: Session) -> bool:
+            return r.sid.startswith(session) or any(u.startswith(session) for u in r.uuids)
+
         if family_mode:
-            recs = [r for r in recs if r.sid.startswith(session)
-                    or (r.parent or "").startswith(session)]
+            recs = [r for r in recs if _hit(r) or (r.parent or "").startswith(session)]
         else:
-            recs = [r for r in recs if r.sid.startswith(session)]
+            recs = [r for r in recs if _hit(r)]
     if model:
         recs = [r for r in recs if any(model in m for m in r.models)]
         for r in recs:                    # 模型维度过滤：仅保留匹配模型的用量

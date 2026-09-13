@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-13
+
+### Fixed
+
+- `--session <uuid>` now matches any UUID in the rollout file name, so `--raw` picks up
+  paginated continuation files (the continuation page's session id is the trailing UUID).
+  Paginated sessions account for 7.88% of the window's tokens on the maintainer's data;
+  the default (merged) view was always correct.
+
 ## [0.2.0] - 2026-09-13
 
 ### Changed
