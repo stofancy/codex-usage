@@ -1,7 +1,7 @@
 # codex-usage 竞品调研（开源前市场/定位分析）
 
 > 任务：T5 竞品调研：能力对照、优势素材、劣势清单
-> 调研负责人：research-dev ｜ 抓取日期：**2026-09-13（UTC）**
+> 调研负责人：research-dev ｜ 抓取日期：**2026-09-21（UTC）**
 > 本文所有外部数据均来自当日直连抓取（GitHub REST API + 各仓库 README 原文 + npm registry），不依赖搜索结果摘要。
 > 涉及的仓库当前状态可能已变化；引用时请连同抓取日期一起引用。
 
@@ -25,7 +25,7 @@ curl -sL https://raw.githubusercontent.com/ccusage/ccusage/main/docs/guide/codex
 - ⬜ **未获取**：抓取当日没有拿到可靠数据，不猜数字。
 - 涉及"我方"（codex-usage）的事实一律给本仓库内路径或 README 行号。
 
-**我方基线（本仓库，抓取日状态；2026-09-13 晚按开源改造后的实测更新过成本/测试两行）**
+**我方基线（本仓库，抓取日状态；2026-09-21 晚按开源改造后的实测更新过成本/测试两行）**
 
 | 项 | 值 | 依据 |
 |---|---|---|
@@ -43,7 +43,7 @@ curl -sL https://raw.githubusercontent.com/ccusage/ccusage/main/docs/guide/codex
 ## 1. 事实对照表
 
 共核实 **11 个仓库 + 4 个 npm 包**（`toktrack` 仓库与其 npm 包为同一项目）。分三张表：能力（1.1）、输出与成本（1.2）、工程与生态（1.3）。
-所有 star / `pushed_at` / license 均为 **2026-09-13（UTC）** GitHub API 返回值。
+所有 star / `pushed_at` / license 均为 **2026-09-21（UTC）** GitHub API 返回值。
 
 ### 1.1 覆盖数据源、聚合维度、图表、子代理/家族
 
@@ -83,9 +83,9 @@ curl -sL https://raw.githubusercontent.com/ccusage/ccusage/main/docs/guide/codex
 
 ### 1.3 安装、跨平台、license、活跃度
 
-> star / fork / `pushed_at` / license 字段：**2026-09-13（UTC）** 取自 `https://api.github.com/repos/<owner>/<repo>`；最近 release 取自 `/releases?per_page=1`。npm 版本取自 `https://registry.npmjs.org/<pkg>`。
+> star / fork / `pushed_at` / license 字段：**2026-09-21（UTC）** 取自 `https://api.github.com/repos/<owner>/<repo>`；最近 release 取自 `/releases?per_page=1`。npm 版本取自 `https://registry.npmjs.org/<pkg>`。
 
-| 竞品 | 安装方式 | 跨平台（README 明示程度） | License | 活跃度（抓取日 2026-09-13） |
+| 竞品 | 安装方式 | 跨平台（README 明示程度） | License | 活跃度（抓取日 2026-09-21） |
 |---|---|---|---|---|
 | **ccusage/ccusage** | `npx ccusage@latest`、`bunx`、`pnpm dlx`、`pnpx`、`nix run`；另有 PR 预览包 | README 未列平台矩阵 🟡（npm/Nix 分发，Rust 实现） | README 写 MIT；GitHub API license 字段为 `NOASSERTION`（两者不一致，以 README 为准：MIT） | **18520★** / 829 fork / pushed `2026-09-13` / 最近 release **v20.0.20（2026-08-15）** / open issues 31 |
 | **Piebald-AI/splitrail** | Releases 页下载二进制；源码 `cargo run` | 明确自述 cross-platform；README 有 Windows（需 LLVM `lld-link`）与 macOS/Linux 构建说明 | MIT | 223★ / 25 fork / pushed `2026-09-11` / **v3.9.1（2026-09-06）** |
@@ -101,7 +101,7 @@ curl -sL https://raw.githubusercontent.com/ccusage/ccusage/main/docs/guide/codex
 
 **npm 包补充（2026-09-13 抓取）**：`@ccusage/codex` v19.0.0（2026-05-19 最后修改，描述已标 "Deprecated compatibility package. Use npx ccusage instead."）；`@ccusage/mcp` v18.0.11（2026-05-19，同样是 v18 世代产物）；`@unravel-tech/ccusage-codex` v18.2.2（2026-03-06）；`toktrack` v2.17.1（2026-09-04）；`codeburn` v0.9.24（2026-09-04）。
 
-**抓取日发现的同类工具（未逐家深挖，供后续补充）**：`JingbiaoMei/Tokdash`（71★，Python，heatmap + 配额）、`sahil87/tu`（4★）、`CDimonaco/tokenpile`（Go CLI+TUI，按 GitHub issue 计费）、`ankit-aglawe/agentwatch`（Rust TUI）、`phuryn/claude-usage`（2218★，Claude 专用 dashboard）、`Javis603/token-monitor`（2116★）、`xiufengsun/TokenTracker`（1595★）等（均来自 2026-09-13 GitHub search API 结果）。
+**抓取日发现的同类工具（未逐家深挖，供后续补充）**：`JingbiaoMei/Tokdash`（71★，Python，heatmap + 配额）、`sahil87/tu`（4★）、`CDimonaco/tokenpile`（Go CLI+TUI，按 GitHub issue 计费）、`ankit-aglawe/agentwatch`（Rust TUI）、`phuryn/claude-usage`（2218★，Claude 专用 dashboard）、`Javis603/token-monitor`（2116★）、`xiufengsun/TokenTracker`（1595★）等（均来自 2026-09-21 GitHub search API 结果）。
 
 ---
 
@@ -235,7 +235,7 @@ curl -sL https://raw.githubusercontent.com/ccusage/ccusage/main/docs/guide/codex
 
 ## 附录 B. 引用 URL 与抓取日期
 
-全部抓取于 **2026-09-13（UTC）**（GitHub API、README raw、npm registry）。
+全部抓取于 **2026-09-21（UTC）**（GitHub API、README raw、npm registry）。
 
 - ccusage：<https://github.com/ccusage/ccusage> ｜ Codex 文档 <https://github.com/ccusage/ccusage/blob/main/docs/guide/codex/index.md> ｜ JSON 文档 <https://github.com/ccusage/ccusage/blob/main/docs/guide/json-output.md> ｜ 社区项目 <https://github.com/ccusage/ccusage/blob/main/docs/guide/community-projects.md> ｜ 已移除的 live monitoring <https://github.com/ccusage/ccusage/blob/main/docs/guide/live-monitoring.md>
 - splitrail：<https://github.com/Piebald-AI/splitrail>

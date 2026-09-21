@@ -11,9 +11,9 @@ import shutil
 import plotext as plt
 from termcharts import pie as tc_pie
 
-METRICS = ("cost", "input", "cache", "output", "total")
+METRICS = ("cost", "input", "cache", "hit", "output", "total")
 METRIC_LABEL = {"cost": "成本(USD)", "input": "净输入", "cache": "缓存读",
-                "output": "输出", "total": "总 tokens"}
+                "hit": "缓存命中率", "output": "输出", "total": "总 tokens"}
 
 # 字符画用的 ASCII 词表（长词在前，避免部分覆盖）
 _ASCII_WORDS = (
@@ -23,6 +23,7 @@ _ASCII_WORDS = (
     ("每天", "per day "),
     ("各模型", "by model "),
     ("成本(USD)", "cost (USD)"),
+    ("缓存命中率", "cache hit rate"),
     ("净输入", "input"),
     ("缓存读", "cache read"),
     ("输出", "output"),
@@ -38,8 +39,15 @@ def ascii_text(s: str) -> str:
 
 
 def metric_of(entry: list, metric: str) -> float:
-    """从聚合槽位 [net, cached, out, calls, cost, known, nsess] 取指标值。"""
+    """从聚合槽位 [net, cached, out, calls, cost, known, nsess] 取指标值。
+
+    ``hit`` 是**加权**命中率：Σ缓存读 / Σ毛输入（毛输入 = Σ净 + Σ缓存读）。它对
+    聚合后的槽位计算，所以按天/按模型/家族分组都不会退化成“平均百分比”。
+    """
     net, cached, out, cost = entry[0], entry[1], entry[2], entry[4]
+    if metric == "hit":
+        gross = net + cached
+        return cached / gross if gross else 0.0
     return {"cost": cost, "input": net, "cache": cached,
             "output": out, "total": net + cached + out}[metric]
 

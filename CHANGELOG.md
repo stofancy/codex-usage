@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Versioning notes
 
-- The first public release is `0.1.0` (2026-09-13); the project deliberately stays in the
+- The first public release is `0.1.0` (2026-09-21); the project deliberately stays in the
   `0.x` range so that breaking changes are still allowed before `1.0.0`.
 - Unreleased work goes under `[Unreleased]`; at release time that section is renamed to
   `[X.Y.Z] - YYYY-MM-DD` and a fresh empty `[Unreleased]` opens.
@@ -18,7 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-09-13
+## [0.3.0] - 2026-09-21
+
+### Added
+
+- Cache hit rate: every table gained a hit-rate column and charts accept `--metric hit`. The
+  ratio is cache read ÷ gross input (gross input includes cache read), the same definition as
+  the API's `cached_tokens / input_tokens`. Aggregates are weighted (Σ cache read ÷ Σ gross
+  input) so grouping by day, model or family never degenerates into an average of per-row
+  percentages; rows with no input show `-` instead of a misleading 0%. `--json` exposes
+  `cache_hit_rate` per session and per model (null when there is no input). `--chart pie`
+  rejects the metric because share-of-total is meaningless for a ratio.
+
+## [0.2.1] - 2026-09-21
 
 ### Fixed
 
@@ -27,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Paginated sessions account for 7.88% of the window's tokens on the maintainer's data;
   the default (merged) view was always correct.
 
-## [0.2.0] - 2026-09-13
+## [0.2.0] - 2026-09-21
 
 ### Changed
 
@@ -77,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconciliation with ccusage (identical tokens, +$51.40 cost because ccusage does not apply
   the `gpt-6-astra` Fast rate).
 
-## [0.1.0] - 2026-09-13
+## [0.1.0] - 2026-09-21
 
 ### Added
 

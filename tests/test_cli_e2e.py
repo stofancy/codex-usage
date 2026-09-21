@@ -277,3 +277,24 @@ def test_empty_range(env):
     r = run(env, "--since", "2026-08-01", "--until", "2026-08-02")
     assert r.returncode == 0
     assert "没有会话" in r.stdout
+
+
+def test_metric_hit_in_json_chart_and_pie_rejection(env):
+    """缓存命中率：--json 带字段（会话级+模型级）、可作图表指标、饼图明确拒绝。"""
+    r = run(env, "--json")
+    assert r.returncode == 0, r.stderr[-300:]
+    rows = [json.loads(x) for x in r.stdout.splitlines()]
+    assert rows
+    for row in rows:
+        hit = row["cache_hit_rate"]
+        assert hit is None or 0.0 <= hit <= 1.0
+        for m in row["models"].values():
+            assert "cache_hit_rate" in m
+
+    r = run(env, "--chart", "bar", "--metric", "hit")
+    assert r.returncode == 0, r.stderr[-300:]
+    assert "命中率" in r.stdout or "hit rate" in r.stdout
+
+    r = run(env, "--chart", "pie", "--metric", "hit")
+    assert r.returncode == 2
+    assert "不支持" in r.stderr

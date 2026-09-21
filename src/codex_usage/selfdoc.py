@@ -99,6 +99,8 @@ _JSON_FIELDS = {
     "models": {"type": "object", "meaning": "按模型明细，见 model_fields"},
     "input_net": {"type": "integer", "unit": "tokens", "meaning": "净输入 = 毛输入 − 缓存读"},
     "cache_read": {"type": "integer", "unit": "tokens", "meaning": "缓存读"},
+    "cache_hit_rate": {"type": "number|null", "meaning": "缓存命中率 = 缓存读 / 毛输入，0~1；"
+                                                       "无输入时为 null"},
     "output": {"type": "integer", "unit": "tokens", "meaning": "输出"},
     "total_tokens": {"type": "integer", "unit": "tokens", "meaning": "毛输入 + 输出 = 净输入 + 缓存读 + 输出"},
     "calls": {"type": "integer", "meaning": "API 调用次数（token_count 轮次）"},
@@ -115,6 +117,8 @@ _JSON_FIELDS = {
 _MODEL_FIELDS = {
     "input_gross": {"type": "integer", "unit": "tokens", "meaning": "毛输入（含缓存读）"},
     "cached": {"type": "integer", "unit": "tokens", "meaning": "缓存读"},
+    "cache_hit_rate": {"type": "number|null", "meaning": "该模型缓存命中率 = 缓存读 / 毛输入，0~1；"
+                                                       "无输入时为 null"},
     "output": {"type": "integer", "unit": "tokens", "meaning": "输出"},
     "reasoning": {"type": "integer", "unit": "tokens", "meaning": "推理输出"},
     "calls": {"type": "integer", "meaning": "该模型参与调用的轮次"},
@@ -124,11 +128,13 @@ _METRICS = {
     "cost": {"axis": "USD", "meaning": "按定价折算成本（无定价的模型按 0 计）"},
     "input": {"axis": "tokens", "meaning": "净输入 = 毛输入 − 缓存读"},
     "cache": {"axis": "tokens", "meaning": "缓存读"},
+    "hit": {"axis": "ratio", "meaning": "缓存命中率 = 缓存读 / 毛输入（毛输入含缓存读），0~1；"
+                                       "聚合按 Σ缓存读 / Σ毛输入 加权，不是平均百分比"},
     "output": {"axis": "tokens", "meaning": "输出"},
     "total": {"axis": "tokens", "meaning": "总 tokens = 净输入 + 缓存读 + 输出"},
 }
 
-_TABLE_COLUMNS = ["净输入", "缓存读", "输出", "总 tokens", "调用", "单次成本", "成本"]
+_TABLE_COLUMNS = ["净输入", "缓存读", "命中率", "输出", "总 tokens", "调用", "单次成本", "成本"]
 
 _DATA_SOURCES = {
     "sessions_dir": {"env": "CODEX_USAGE_SESSIONS_DIR", "default": "~/.codex/sessions",

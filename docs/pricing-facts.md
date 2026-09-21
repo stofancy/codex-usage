@@ -1,7 +1,7 @@
 # 定价事实：priority/Fast 档位、倍率来源、`codex-auto-review` 与 `gpt-reserve`
 
 > 任务：T8 调研：priority/Fast 倍率来源与 codex-auto-review 标签语义
-> 调研：research-dev ｜ **抓取/复算日期：2026-09-13（UTC）**
+> 调研：research-dev ｜ **抓取/复算日期：2026-09-21（UTC）**
 > 目的：给「更准的统计」提供外部事实依据，**禁止臆造价格**。每条结论都附一手证据（URL + 原文引用）。
 > 标注：🟢 一手事实（官方文档/仓库源码/实测数字）｜🟡 推断或反推（写明依据）｜⬜ 未获取。
 
@@ -22,7 +22,7 @@
 
 ### 1.1 官方口径：Fast mode = 原 priority processing 🟢
 
-> 来源：<https://platform.openai.com/docs/guides/priority-processing.md>（标题 `# Fast mode`），抓取日 **2026-09-13**
+> 来源：<https://platform.openai.com/docs/guides/priority-processing.md>（标题 `# Fast mode`），抓取日 **2026-09-21**
 
 原文引用：
 
@@ -38,7 +38,7 @@
 
 结论 🟢：`priority` 与 `fast` 是同一件事的两个拼写；`default` 表示按标准速率计费（可能是客户端显式选择，也可能是服务端把 Fast 请求降级后的响应值）；这不是"三档定价"，而是"标准 / Fast（原 priority）/ Flex"三条计费路径。
 
-补充 🟢（Codex 产品侧）：<https://learn.chatgpt.com/docs/agent-configuration/speed.md>（抓取日 2026-09-13）原文：
+补充 🟢（Codex 产品侧）：<https://learn.chatgpt.com/docs/agent-configuration/speed.md>（抓取日 2026-09-21）原文：
 
 > "Codex offers the ability to increase the speed of the model for increased credit consumption. For GPT-5.6, GPT-5.5, and GPT-5.4, Fast mode increases model speed by 1.5x. GPT-5.6 and GPT-5.5 consume credits at 2.5x the Standard rate; GPT-5.4 consumes credits at 2x the Standard rate."
 > "Use `/fast on`, `/fast off`, or `/fast status` in the CLI… You can also persist the default with `service_tier = "fast"` plus `[features].fast_mode = true` in `config.toml`."
@@ -46,7 +46,7 @@
 
 ### 1.2 Codex 实现侧：档位枚举与请求值 🟢
 
-> 来源：`openai/codex` 源码（`main` 分支，抓取日 2026-09-13）
+> 来源：`openai/codex` 源码（`main` 分支，抓取日 2026-09-21）
 > <https://raw.githubusercontent.com/openai/codex/main/codex-rs/protocol/src/config_types.rs>
 
 ```rust
@@ -76,7 +76,7 @@ impl ServiceTier {
 
 Codex 官方 PR <https://github.com/openai/codex/pull/23537>（已合并 2026-05-20）描述三种状态必须区分：无显式 tier / 显式 `default` / 目录档位 `priority`、`flex`；并明确「normalized legacy config spelling so `fast` in `config.toml` still materializes as the runtime/request id `priority`」。
 
-Codex 模型目录 <https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json>（抓取日 2026-09-13）里每个模型的 `service_tiers` 只有 id `priority`（`gpt-5.6-sol` 另有 `ultrafast`），描述是 "1.5x speed, increased usage" —— **目录里没有任何价格字段**（9 个模型的 `cost`/`price` 字段为空）。
+Codex 模型目录 <https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json>（抓取日 2026-09-21）里每个模型的 `service_tiers` 只有 id `priority`（`gpt-5.6-sol` 另有 `ultrafast`），描述是 "1.5x speed, increased usage" —— **目录里没有任何价格字段**（9 个模型的 `cost`/`price` 字段为空）。
 
 ### 1.3 `thread_settings_applied` 事件结构与 ccusage 的读法 🟢
 
@@ -88,7 +88,7 @@ Codex 模型目录 <https://raw.githubusercontent.com/openai/codex/main/codex-rs
                      "service_tier": "default", "approval_policy": "never", …}}
 ```
 
-ccusage 的 Rust 解析器（<https://raw.githubusercontent.com/ccusage/ccusage/main/rust/adapters/codex/src/parser.rs>，抓取日 2026-09-13）：
+ccusage 的 Rust 解析器（<https://raw.githubusercontent.com/ccusage/ccusage/main/rust/adapters/codex/src/parser.rs>，抓取日 2026-09-21）：
 
 ```rust
 if payload.payload_type.as_deref() == Some("thread_settings_applied") {
@@ -138,7 +138,7 @@ fn codex_service_tier(value: &str) -> Option<CodexServiceTier> {
 
 ### 2.1 官方逐模型 Fast 价（一手，最权威）🟢
 
-> 来源：<https://platform.openai.com/docs/pricing.md>，抓取日 **2026-09-13**。原文表头：`### Standard pricing data` / `### Fast pricing data` / `### Flex pricing data`。
+> 来源：<https://platform.openai.com/docs/pricing.md>，抓取日 **2026-09-21**。原文表头：`### Standard pricing data` / `### Fast pricing data` / `### Flex pricing data`。
 
 **Standard（短上下文，USD / 1M tokens）**
 
@@ -184,7 +184,7 @@ fn codex_service_tier(value: &str) -> Option<CodexServiceTier> {
 
 ### 2.2 订阅（ChatGPT credits）口径 ≠ API 口径 🟢
 
-> 来源：<https://learn.chatgpt.com/docs/agent-configuration/speed.md> 与 <https://learn.chatgpt.com/docs/pricing.md>，抓取日 2026-09-13
+> 来源：<https://learn.chatgpt.com/docs/agent-configuration/speed.md> 与 <https://learn.chatgpt.com/docs/pricing.md>，抓取日 2026-09-21
 
 - credits 倍率：**GPT-5.6 / GPT-5.5 = 2.5×**，**GPT-5.4 = 2×**，**GPT-6 Astra = 2.5×**（speed.md 原文见 1.1；pricing.md 原文：「Fast mode applies a 2.5x multiplier to Astra's Standard rate.」）。
 - API 口径：GPT-5.6 Sol = 2×（见 2.1）。
@@ -194,7 +194,7 @@ fn codex_service_tier(value: &str) -> Option<CodexServiceTier> {
 
 ### 2.3 LiteLLM 快照里到底有没有 priority/flex 字段 🟢
 
-快照：`.scratch/litellm.json`（本机 2026-09-13 19:07 保存；上游 `model_prices_and_context_window.json` 在 GitHub 上的最后提交为 `b1a61f510c90`，`2026-09-13T04:13:52Z`，`gh api repos/BerriAI/litellm/commits?path=…`）。⬜ 本仓库未留下该快照的下载命令行，URL 依据上游文件名与 `LiteLLMPricingFetcher` 的惯例，**标记为待确认**。
+快照：`.scratch/litellm.json`（本机 2026-09-21 19:07 保存；上游 `model_prices_and_context_window.json` 在 GitHub 上的最后提交为 `b1a61f510c90`，`2026-09-13T04:13:52Z`，`gh api repos/BerriAI/litellm/commits?path=…`）。⬜ 本仓库未留下该快照的下载命令行，URL 依据上游文件名与 `LiteLLMPricingFetcher` 的惯例，**标记为待确认**。
 
 | 字段族 | 出现次数（键名计数） | 说明 |
 |---|---|---|
@@ -229,7 +229,7 @@ fn codex_service_tier(value: &str) -> Option<CodexServiceTier> {
 
 ### 2.4 models.dev 快照：**没有** priority/flex 价 🟢
 
-快照：`.scratch/models.dev.json`（本机 2026-09-13 19:07 保存；上游 <https://models.dev/api.json>，抓取日 2026-09-13，HTTP 200，ETag `"4118ac46a2dc3c2c548c048fe79efaba"`）。
+快照：`.scratch/models.dev.json`（本机 2026-09-21 19:07 保存；上游 <https://models.dev/api.json>，抓取日 2026-09-21，HTTP 200，ETag `"4118ac46a2dc3c2c548c048fe79efaba"`）。
 
 - `cost` 结构只有：`input` / `output` / `cache_read` / `cache_write` / `reasoning`，以及 `tiers: [{input, output, cache_read, cache_write, tier:{type:"context", size:272000}}]` 和 `context_over_200k`。
 - 🟢 `tiers` 的 `tier.type` 一律是 **`context`**（上下文长度分档），**不是** service tier；全库 grep 不到 priority/flex 价字段。
@@ -269,7 +269,7 @@ const speedMultiplier = this.speed === 'fast'
   : 1;
 ```
 
-而 LiteLLM 里 `provider_specific_entry.fast` 只存在于两个 Claude 模型（见 2.3）→ 对 Codex 模型它永远走 2× 兜底。ccusage 文档（`docs/guide/codex/index.md`，抓取日 2026-09-13）自述：
+而 LiteLLM 里 `provider_specific_entry.fast` 只存在于两个 Claude 模型（见 2.3）→ 对 Codex 模型它永远走 2× 兜底。ccusage 文档（`docs/guide/codex/index.md`，抓取日 2026-09-21）自述：
 
 > "Fast pricing uses a model-specific multiplier only when one is available; otherwise, ccusage keeps standard pricing rather than inventing a rate."
 
@@ -278,7 +278,7 @@ const speedMultiplier = this.speed === 'fast'
 ### 2.6 实测反推：验证 ccusage 的实际加成（本机 2026-09-12）🟡（有强证据的推断）
 
 素材：
-- `.scratch/ccusage.json`（本机 ccusage 输出快照，2026-09-13）：`2026-09-12` 行 `costUSD = 853.8963367599999`，各模型 `inputTokens`（= 净输入，见下）、`cacheReadTokens`、`outputTokens`。
+- `.scratch/ccusage.json`（本机 ccusage 输出快照，2026-09-21）：`2026-09-12` 行 `costUSD = 853.8963367599999`，各模型 `inputTokens`（= 净输入，见下）、`cacheReadTokens`、`outputTokens`。
 - 我方独立扫描（见 1.4）得到同日各 (模型, tier) 的 token 量，其中 **priority 轮次**：`gpt-6-astra` 297 轮 / `gpt-5.6-luna` 31 轮 / `codex-auto-review` 50 轮。
 
 核算（用 ccusage 自己的 token 数 × LiteLLM standard 价）：
@@ -325,7 +325,7 @@ const speedMultiplier = this.speed === 'fast'
 
 ### 3.1 `codex-auto-review` 在 Codex 侧的真实含义 🟢
 
-Codex 官方模型目录里它是一个**正式条目**（<https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json>，抓取日 2026-09-13）：
+Codex 官方模型目录里它是一个**正式条目**（<https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json>，抓取日 2026-09-21）：
 
 ```json
 {
@@ -360,7 +360,7 @@ fn codex_log_model_fallback(model: &str, timestamp: &str) -> Option<&'static str
 }
 ```
 
-映射表（<https://raw.githubusercontent.com/ccusage/ccusage/main/rust/adapters/codex/src/codex-auto-review-fallbacks.json>，抓取日 2026-09-13）**按发布日降序**：
+映射表（<https://raw.githubusercontent.com/ccusage/ccusage/main/rust/adapters/codex/src/codex-auto-review-fallbacks.json>，抓取日 2026-09-21）**按发布日降序**：
 
 ```json
 [{"releasedOn":"2026-04-23","model":"gpt-5.5"},
@@ -407,7 +407,7 @@ pub(crate) fn model_display_name(model: &str) -> &str {
 
 - 🟢 它是 **"Luna Reserve"**：普通额度耗尽后的兜底路由；在 Codex 模型目录（`models.json`）里**没有条目**、也**没有价格**。
 - 🟢 本机确有大量使用：2026-09-12 共 **375 轮**，净输入 1,831,531 / 缓存读 56,109,568 / 输出 106,760（≈58.0M tokens）。
-- 🟢 第三方处理先例（kenn-io/agentsview，<https://raw.githubusercontent.com/kenn-io/agentsview/main/internal/pricing/supplemental.go>，抓取日 2026-09-13）：
+- 🟢 第三方处理先例（kenn-io/agentsview，<https://raw.githubusercontent.com/kenn-io/agentsview/main/internal/pricing/supplemental.go>，抓取日 2026-09-21）：
 
 ```go
 // GPT56LunaCanonical is the catalog id for Codex Luna Reserve (gpt-reserve).
@@ -467,7 +467,7 @@ GPTReserveModelName = "gpt-reserve"
 
 ---
 
-## 附录 A. 证据索引（全部抓取于 2026-09-13 UTC）
+## 附录 A. 证据索引（全部抓取于 2026-09-21 UTC）
 
 | # | 内容 | URL |
 |---|---|---|
@@ -493,7 +493,7 @@ GPTReserveModelName = "gpt-reserve"
 
 本机素材（只读引用，未修改）：
 
-- `.scratch/litellm.json`、`.scratch/models.dev.json`（2026-09-13 19:07 保存的快照）
+- `.scratch/litellm.json`、`.scratch/models.dev.json`（2026-09-21 19:07 保存的快照）
 - `.scratch/ccusage.json`（本机 ccusage 输出快照，含 2026-09-11/12/13 三天）
 - `~/.codex/sessions/2026/09/{10,11,12,13}/*.jsonl`（132 个文件；`~/.codex/config.toml` 只读）
 

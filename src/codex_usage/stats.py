@@ -52,6 +52,22 @@ def rec_cost(rec: Session, pricing: dict) -> tuple[float, bool]:
     return total, known
 
 
+def hit_rate(net: int, cached: int) -> float | None:
+    """缓存命中率 = 缓存读 / 毛输入（毛输入 = 净输入 + 缓存读）。
+
+    与 API 的 ``cached_tokens / input_tokens`` 同口径（``input_tokens`` 含缓存读）。
+    完全没有输入时返回 None（调用方显示 “-”），不要用 0 冒充“全未命中”。
+    """
+    gross = net + cached
+    return cached / gross if gross else None
+
+
+def rec_hit(rec: Session) -> float | None:
+    """会话级缓存命中率；聚合时务必按 Σ缓存读 / Σ毛输入 重算，不能平均各行百分比。"""
+    gin, ca, _ = rec_tokens(rec)
+    return hit_rate(gin - ca, ca)
+
+
 def rec_calls(rec: Session) -> int:
     """API 调用次数（token_count 轮次）。"""
     return sum(v[4] for v in rec.models.values())

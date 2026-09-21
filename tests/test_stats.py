@@ -125,3 +125,27 @@ def test_raw_session_filter_matches_any_uuid(env):
     first_uid = pages[0].uuids[0]
     hit = stats.apply_filters(raw, session=first_uid)
     assert {r.file for r in hit} >= {r.file for r in pages}   # 两页都要命中
+
+
+def test_hit_rate_edges_and_weighting():
+    """命中率口径：缓存读/毛输入；无输入返回 None；聚合必须加权，不能平均各行百分比。"""
+    from codex_usage import stats
+    from codex_usage.render import charts, tables
+
+    assert stats.hit_rate(0, 0) is None          # 完全没有输入 → None（显示 -，不是 0%）
+    assert stats.hit_rate(1, 0) == 0.0
+    assert stats.hit_rate(0, 1) == 1.0
+    assert abs(stats.hit_rate(1, 3) - 0.75) < 1e-9
+
+    # 90%（毛输入 10M）与 1%（毛输入 100M）合并：加权 = 10/110 = 9.09%，直接平均会得 45.5%
+    a1 = [1_000_000, 9_000_000, 0, 0, 0.0, True, 1]
+    a2 = [99_000_000, 1_000_000, 0, 0, 0.0, True, 1]
+    merged = [x + y for x, y in zip(a1, a2)]
+    weighted = charts.metric_of(merged, "hit")
+    naive = (charts.metric_of(a1, "hit") + charts.metric_of(a2, "hit")) / 2
+    assert abs(weighted - 10 / 110) < 1e-9
+    assert abs(naive - 0.455) < 1e-9
+    assert weighted != naive
+
+    assert tables._hit_s(0, 0) == "-"            # 无输入不显示 0%
+    assert tables._hit_s(1, 3) == "75.0%"

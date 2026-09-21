@@ -20,9 +20,9 @@
 - **机器可读的自描述**：`--schema` 的选项清单由 argparse 定义生成（不会与实现漂移），并给出 `--json` 字段契约与图表档位的环境变量；`--doctor` 自检数据源、定价层、真图依赖、终端档位与中文字体，支持 `--json` 供 Agent 消费。
 - **子代理与家族树是一等公民**：逐文件解析、子代理按昵称+角色单列，`--family` 把主线程与各子代理放进同一棵树；部分聚合工具从更高层状态派生 Codex 用量，fork 之后可能永久延迟会话（[farion1231/cc-switch#5687](https://github.com/farion1231/cc-switch/issues/5687)）。
 - **默认离线**：统计、聚合、出图全程不联网，内置定价快照（2086 个模型）让装完就有可用的成本列；`--update-pricing` 是唯一联网动作，且只在显式触发时发生。
-- **口径可验证**：token 取自 `total_token_usage` **累计值的增量**，归因到该轮 `turn_context` 的模型；累计值回落或缺失时回退 `last_token_usage`，重复帧不重计，继承父线程历史的空首帧不计（见[计量口径](#计量口径)）。定窗 `--since 20260911 --until 20260912`（复算日 2026-09-13）下我们与 ccusage 的逐 (天,模型) 台账**完全一致（1,830,205,933 tokens，差 0）**，[剩下的成本差异](#与-ccusage-的对账)来自 ccusage 未施加的 Fast 档加成。整套用例跑在合成夹具上（不依赖本机 Codex 数据），覆盖 Python 3.10–3.13 CI 矩阵。
+- **口径可验证**：token 取自 `total_token_usage` **累计值的增量**，归因到该轮 `turn_context` 的模型；累计值回落或缺失时回退 `last_token_usage`，重复帧不重计，继承父线程历史的空首帧不计（见[计量口径](#计量口径)）。定窗 `--since 20260911 --until 20260912`（复算日 2026-09-21）下我们与 ccusage 的逐 (天,模型) 台账**完全一致（1,830,205,933 tokens，差 0）**，[剩下的成本差异](#与-ccusage-的对账)来自 ccusage 未施加的 Fast 档加成。整套用例跑在合成夹具上（不依赖本机 Codex 数据），覆盖 Python 3.10–3.13 CI 矩阵。
 
-如实说明差距：[ccusage](https://github.com/ccusage/ccusage) 有 18,520 stars（抓取日 2026-09-13）、覆盖 18 个 CLI、`npx` 一行即用；codex-usage 是单数据源、单作者的项目。我们想做的是**把 Codex 一件事做深**，而不是再做一个横跨 40 个工具的聚合面板。
+如实说明差距：[ccusage](https://github.com/ccusage/ccusage) 有 18,520 stars（抓取日 2026-09-21）、覆盖 18 个 CLI、`npx` 一行即用；codex-usage 是单数据源、单作者的项目。我们想做的是**把 Codex 一件事做深**，而不是再做一个横跨 40 个工具的聚合面板。
 
 ## 安装
 
@@ -75,6 +75,7 @@ codex-usage --update-pricing                         # 刷新本地定价缓存�
 | 列 | 口径 |
 |---|---|
 | 净输入 / 缓存读 / 输出 | token 数；净输入 = 毛输入 − 缓存读 |
+| 命中率 | 缓存读 ÷ 毛输入（毛输入含缓存读），与 API 的 `cached_tokens / input_tokens` 同口径；聚合按 Σ缓存读 ÷ Σ毛输入 **加权**，不是平均各行百分比；完全没有输入时显示 `-` |
 | 总 tokens | 净输入 + 缓存读 + 输出 |
 | 调用 | API 调用次数（`token_count` 轮次，按当时模型归因） |
 | 单次成本 | 成本 ÷ 调用次数；无调用显示 `-` |
@@ -99,7 +100,7 @@ token 取自 rollout 里 `token_count.total_token_usage` 的**累计值快照**�
 | 聚合 | `--by-day` `--by-model` | 决定行粒度；可组合成 天×模型 |
 | 结构 | `--family` `--raw` | 家族树 / 文件粒度实体 |
 | 过滤 | `--since` `--until` `--type` `--model` `--session` `--parent` `--archived` | 只缩小范围，不改变行粒度 |
-| 图表 | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|output\|total` `--ascii` | 数据来自聚合维度，`--ascii` 强制字符画 |
+| 图表 | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|hit\|output\|total` `--ascii` | 数据来自聚合维度，`--ascii` 强制字符画；`--metric hit` 是缓存命中率（0~1 比率），不能与 `--chart pie` 组合 |
 | 输出 | `--json` | 会话级 JSON Lines，含按模型明细（含调用次数），与其他参数兼容 |
 | 自述 | `--schema` `--doctor` | 机器可读契约 / 环境自检，优先于其它参数 |
 
@@ -136,7 +137,7 @@ codex-usage --update-pricing --pricing-source litellm
 
 ### 与 ccusage 的对账
 
-定窗 `--since 20260911 --until 20260912`，复算日 2026-09-13：
+定窗 `--since 20260911 --until 20260912`，复算日 2026-09-21：
 
 | | codex-usage | ccusage | 差值 |
 |---|---|---|---|

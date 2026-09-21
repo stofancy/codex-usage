@@ -98,9 +98,12 @@ def _emit_json(recs, pricing):
             "first_ts": r.first_local.isoformat() if r.first_local else None,
             "last_ts": r.last_local.isoformat() if r.last_local else None,
             "models": {m: {"input_gross": v[0], "cached": v[1], "output": v[2],
-                           "reasoning": v[3], "calls": v[4]} for m, v in r.models.items()},
+                           "reasoning": v[3], "calls": v[4],
+                           "cache_hit_rate": round(v[1] / v[0], 4) if v[0] else None}
+                       for m, v in r.models.items()},
             "input_net": gin - cached, "cache_read": cached, "output": out,
             "total_tokens": gin + out,  # 毛+输出 = 净+缓存+输出
+            "cache_hit_rate": round(cached / gin, 4) if gin else None,   # 缓存读/毛输入
             "calls": stats.rec_calls(r),
             "cost_usd_known": round(cost, 4), "pricing_full": known,
             "last_cumulative_total": r.final_total,
@@ -140,6 +143,8 @@ def _model_metric(mname: str, v: list, metric: str, pricing: dict) -> float:
     """
     if metric == "cost":
         return model_cost(pricing, mname, v[0] - v[1], v[1], v[2]) or 0.0
+    if metric == "hit":
+        return v[1] / v[0] if v[0] else 0.0        # 缓存读 / 毛输入（v[0] 已含缓存读）
     return {"input": v[0] - v[1], "cache": v[1], "output": v[2], "total": v[0] + v[2]}[metric]
 
 
@@ -170,6 +175,10 @@ def _chart_draw(args, recs, pricing, render, emit):
     title_metric = charts.METRIC_LABEL[metric]
 
     if args.chart == "pie":
+        if metric == "hit":
+            print("错误: --chart pie 不支持 --metric hit（命中率是比率，按份额分解没有意义）；"
+                  "请改用 --chart bar/area/line", file=sys.stderr)
+            sys.exit(2)
         agg = stats.aggregate_models(recs, pricing)
         emit(render.chart_pie(agg, metric))
         return

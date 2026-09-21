@@ -22,9 +22,9 @@ Five differences we can point at; the full comparison, the weaknesses and every 
 - **Machine-readable self-description.** `--schema` is generated from the argparse definition, so the option list cannot drift from the implementation, and it exposes the `--json` field contract plus the chart-rendering environment; `--doctor` checks the data sources, the pricing layer, image support, the active terminal tier and the CJK font, with `--json` for agents.
 - **Subagents and family trees are first-class.** Every rollout file is parsed on its own and subagents are listed by nickname + role; `--family` puts a main thread and its subagents into one tree. Some aggregators derive Codex usage from higher-level state and can permanently defer sessions after a fork ([farion1231/cc-switch#5687](https://github.com/farion1231/cc-switch/issues/5687)).
 - **Offline by default.** Counting, aggregating and charting never touch the network, and the built-in price snapshot (2086 models) makes the cost column useful right after install; `--update-pricing` is the only network action and only runs when you ask for it.
-- **Accounting you can verify.** Tokens come from the delta of the cumulative `total_token_usage` snapshots, attributed to the model in effect for that turn, with `last_token_usage` as the fallback when a counter resets or is missing — and no double-counting of repeated snapshots or inherited parent history ([Metering](#metering)). On a fixed window (`--since 20260911 --until 20260912`, recomputed 2026-09-13) our per-(day, model) ledger matches ccusage exactly — 1,830,205,933 tokens, difference 0 — and the [remaining cost difference](#reconciliation-with-ccusage) is a Fast-tier add-on ccusage does not apply. The whole suite runs on synthetic fixtures (no local Codex data needed) across a Python 3.10–3.13 CI matrix.
+- **Accounting you can verify.** Tokens come from the delta of the cumulative `total_token_usage` snapshots, attributed to the model in effect for that turn, with `last_token_usage` as the fallback when a counter resets or is missing — and no double-counting of repeated snapshots or inherited parent history ([Metering](#metering)). On a fixed window (`--since 20260911 --until 20260912`, recomputed 2026-09-21) our per-(day, model) ledger matches ccusage exactly — 1,830,205,933 tokens, difference 0 — and the [remaining cost difference](#reconciliation-with-ccusage) is a Fast-tier add-on ccusage does not apply. The whole suite runs on synthetic fixtures (no local Codex data needed) across a Python 3.10–3.13 CI matrix.
 
-And the honest part: [ccusage](https://github.com/ccusage/ccusage) has 18,520 stars (fetched 2026-09-13), covers 18 CLI tools and installs with `npx`, while codex-usage is a single-source, single-author project. We aim to be the deepest Codex-only view, not another 40-tool dashboard.
+And the honest part: [ccusage](https://github.com/ccusage/ccusage) has 18,520 stars (fetched 2026-09-21), covers 18 CLI tools and installs with `npx`, while codex-usage is a single-source, single-author project. We aim to be the deepest Codex-only view, not another 40-tool dashboard.
 
 ## Install
 
@@ -77,6 +77,7 @@ Missing parts are filled with 0 for `--since` (`20260912-16` → 16:00:00) and w
 | Column | Meaning |
 |---|---|
 | Net input / Cache read / Output | token counts; net input = gross input − cache read |
+| Hit rate | cache read ÷ gross input (gross input includes cache read) — the API's `cached_tokens / input_tokens` ratio; aggregates are **weighted** (Σ cache read ÷ Σ gross input), never an average of per-row percentages; shows `-` when there is no input at all |
 | Total tokens | net input + cache read + output |
 | Calls | number of API calls (`token_count` turns, attributed to the model in effect at that time) |
 | Cost/call | cost ÷ calls; `-` when there are no calls |
@@ -101,7 +102,7 @@ Token counts are derived from the rollout's cumulative `token_count.total_token_
 | Aggregation | `--by-day` `--by-model` | row granularity; can be combined into day × model |
 | Structure | `--family` `--raw` | family tree / file-granularity entities |
 | Filters | `--since` `--until` `--type` `--model` `--session` `--parent` `--archived` | only narrow the range, never change row granularity |
-| Charts | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|output\|total` `--ascii` | data comes from the aggregation dimension; `--ascii` forces ASCII art |
+| Charts | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|hit\|output\|total` `--ascii` | data comes from the aggregation dimension; `--ascii` forces ASCII art; `--metric hit` is the cache hit rate (a 0–1 ratio) and cannot be combined with `--chart pie` |
 | Output | `--json` | session-level JSON Lines with per-model details (including call counts), compatible with the other options |
 | Self-description | `--schema` `--doctor` | machine-readable contract / environment self-check, taking precedence over other options |
 
@@ -138,7 +139,7 @@ Caveats: the built-in table is a snapshot (it carries an `updated` timestamp); c
 
 ### Reconciliation with ccusage
 
-Recomputed on 2026-09-13 for the fixed window `--since 20260911 --until 20260912`:
+Recomputed on 2026-09-21 for the fixed window `--since 20260911 --until 20260912`:
 
 | | codex-usage | ccusage | Difference |
 |---|---|---|---|

@@ -171,7 +171,7 @@ Codex 的 `thread_settings_applied.service_tier` 会标注本轮用量走的档�
 **价格来源**：`src/codex_usage/data/tier_pricing.json`（`CODEX_USAGE_TIER_PRICING_FILE`
 可覆盖），生成自 LiteLLM 快照 `model_prices_and_context_window.json @ b1a61f510c90`
 （2026-09-13T04:13:52Z），逐模型收录 `*_priority` / `*_flex` 价。与 OpenAI 官方
-[Fast/Flex 价目表](https://platform.openai.com/docs/pricing.md)（抓取 2026-09-13）逐项一致：
+[Fast/Flex 价目表](https://platform.openai.com/docs/pricing.md)（抓取 2026-09-21）逐项一致：
 Astra / 5.6 Sol·Terra·Luna / 5.4 / 5.4-mini = **2.0×**，**gpt-5.5 = 2.5×**（官方例外），
 Flex = 0.5×。官方 Fast 表**没有** 5.1/5.2/5.3-codex 的行，只有 LiteLLM 的 2.0×，因此这些
 条目标 `confidence: litellm`（低置信，默认启用）；`gpt-5-codex` 连 priority 价都没有 →
@@ -203,7 +203,7 @@ pricing.tier_multiplier(table, "gpt-5.5", "priority")   # → 2.5
 `src/codex_usage/data/model_aliases.json`（`CODEX_USAGE_ALIASES_FILE` 可覆盖，带 `version`）
 只收录**有依据的假设映射**，命中时明细里保留原始标签并给出 `priced_as` + `assumed: true`：
 
-| 原始标签 | 映射到 | 依据（抓取 2026-09-13） | 不确定性 |
+| 原始标签 | 映射到 | 依据（抓取 2026-09-21） | 不确定性 |
 | --- | --- | --- | --- |
 | `codex-auto-review` | `gpt-5.5` | [ccusage 的 auto-review fallback 表](https://raw.githubusercontent.com/ccusage/ccusage/main/rust/adapters/codex/src/codex-auto-review-fallbacks.json)（按发布日取当时最新 gpt-5.x，2026-09-12 日志 → gpt-5.5）+ 本机三方对账：ccusage 输出的 `gpt-5.5` 行 `isFallback: true`，token 与本机 `codex-auto-review` 一致 | **假设**：Codex 目录里该 slug 无任何价格字段，官方 issue [#20981](https://github.com/openai/codex/issues/20981) 至今 open；路由由服务端决定，可能随时间变化 |
 | `gpt-reserve` | **不映射** | Luna Reserve（额度耗尽兜底），OpenAI/LiteLLM/models.dev 均无价，ccusage 也计 $0 | agentsview 把它映射到 `gpt-5.6-luna` 是**另一个工具的选择**，本项目不臆造 → 保持 `$0.00*` |
