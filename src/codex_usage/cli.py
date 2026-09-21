@@ -99,11 +99,17 @@ def _emit_json(recs, pricing):
             "last_ts": r.last_local.isoformat() if r.last_local else None,
             "models": {m: {"input_gross": v[0], "cached": v[1], "output": v[2],
                            "reasoning": v[3], "calls": v[4],
-                           "cache_hit_rate": round(v[1] / v[0], 4) if v[0] else None}
+                           "cache_hit_rate": round(v[1] / v[0], 4) if v[0] else None,
+                           "cost_per_million_tokens": (
+                               round((model_cost(pricing, m, v[0] - v[1], v[1], v[2]) or 0.0)
+                                     / (v[0] + v[2]) * 1_000_000, 4)
+                               if v[0] + v[2] else None)}
                        for m, v in r.models.items()},
             "input_net": gin - cached, "cache_read": cached, "output": out,
             "total_tokens": gin + out,  # 毛+输出 = 净+缓存+输出
             "cache_hit_rate": round(cached / gin, 4) if gin else None,   # 缓存读/毛输入
+            "cost_per_million_tokens": (round(cost / (gin + out) * 1_000_000, 4)
+                                        if gin + out else None),         # 成本/总tokens
             "calls": stats.rec_calls(r),
             "cost_usd_known": round(cost, 4), "pricing_full": known,
             "last_cumulative_total": r.final_total,
@@ -145,6 +151,11 @@ def _model_metric(mname: str, v: list, metric: str, pricing: dict) -> float:
         return model_cost(pricing, mname, v[0] - v[1], v[1], v[2]) or 0.0
     if metric == "hit":
         return v[1] / v[0] if v[0] else 0.0        # 缓存读 / 毛输入（v[0] 已含缓存读）
+    if metric == "per_mtok":
+        total = v[0] + v[2]                        # 总 tokens = 毛输入 + 输出
+        if not total:
+            return 0.0
+        return (model_cost(pricing, mname, v[0] - v[1], v[1], v[2]) or 0.0) / total * 1_000_000
     return {"input": v[0] - v[1], "cache": v[1], "output": v[2], "total": v[0] + v[2]}[metric]
 
 
@@ -175,8 +186,9 @@ def _chart_draw(args, recs, pricing, render, emit):
     title_metric = charts.METRIC_LABEL[metric]
 
     if args.chart == "pie":
-        if metric == "hit":
-            print("错误: --chart pie 不支持 --metric hit（命中率是比率，按份额分解没有意义）；"
+        if metric in charts.PIE_UNSUPPORTED:
+            print(f"错误: --chart pie 不支持 --metric {metric}"
+                  "（比率/单位价不是“占总量的份额”，按份额分解没有意义）；"
                   "请改用 --chart bar/area/line", file=sys.stderr)
             sys.exit(2)
         agg = stats.aggregate_models(recs, pricing)

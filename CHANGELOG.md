@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-21
+
+### Added
+
+- Cost per million tokens: tables gained a "per 1M tokens" column and charts accept
+  `--metric per_mtok` — cost ÷ total tokens × 1e6, i.e. the blended effective unit price after
+  cache discounts (a high-cache model can be expensive per call yet cheap per token).
+  Aggregates are **weighted** (Σ cost ÷ Σ tokens) instead of averaging per-row unit prices;
+  rows without tokens show `-` and unpriced rows keep the `*` marker. `--json` exposes
+  `cost_per_million_tokens` per session and per model. Like the hit rate it is rejected by
+  `--chart pie`.
+
 ## [0.3.0] - 2026-09-21
 
 ### Added

@@ -81,6 +81,7 @@ Missing parts are filled with 0 for `--since` (`20260912-16` → 16:00:00) and w
 | Total tokens | net input + cache read + output |
 | Calls | number of API calls (`token_count` turns, attributed to the model in effect at that time) |
 | Cost/call | cost ÷ calls; `-` when there are no calls |
+| Per 1M tokens | cost ÷ total tokens × 1e6 — the blended effective unit price after cache discounts; aggregates are **weighted** (Σ cost ÷ Σ tokens), `-` when there are no tokens, `*` when a model is unpriced |
 | Cost | converted with the pricing table; a model with no price counts as $0 and is marked `*` |
 
 ### Metering
@@ -102,7 +103,7 @@ Token counts are derived from the rollout's cumulative `token_count.total_token_
 | Aggregation | `--by-day` `--by-model` | row granularity; can be combined into day × model |
 | Structure | `--family` `--raw` | family tree / file-granularity entities |
 | Filters | `--since` `--until` `--type` `--model` `--session` `--parent` `--archived` | only narrow the range, never change row granularity |
-| Charts | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|hit\|output\|total` `--ascii` | data comes from the aggregation dimension; `--ascii` forces ASCII art; `--metric hit` is the cache hit rate (a 0–1 ratio) and cannot be combined with `--chart pie` |
+| Charts | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|hit\|output\|total\|per_mtok` `--ascii` | data comes from the aggregation dimension; `--ascii` forces ASCII art; `--metric hit` is the cache hit rate (a 0–1 ratio) and cannot be combined with `--chart pie` |
 | Output | `--json` | session-level JSON Lines with per-model details (including call counts), compatible with the other options |
 | Self-description | `--schema` `--doctor` | machine-readable contract / environment self-check, taking precedence over other options |
 

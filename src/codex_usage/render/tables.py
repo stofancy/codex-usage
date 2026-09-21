@@ -1,7 +1,7 @@
 """终端表格视图（rich 实现：CJK 宽字符精确对齐、颜色、无 TTY 自动去色）。
 
-布局约定：所有表格的末 8 列固定为 净输入/缓存读/命中率/输出/总 tokens/调用/单次成本/成本，
-行构造一律走 _metric_row（cells_before + 8 个数字），防止单元格数与列数错位——
+布局约定：所有表格的末 9 列固定为 净输入/缓存读/命中率/输出/总 tokens/调用/单次成本/
+每百万 tokens/成本，行构造一律走 _metric_row（cells_before + 9 个数字），防止单元格数与列数错位——
 rich 对超出的单元格会静默加宽表格，导致合计行数字跑到表头之外。
 """
 
@@ -68,23 +68,35 @@ def _hit_s(net: int, cached: int) -> str:
     return f"{cached / gross:.1%}" if gross else "-"
 
 
-def _metric_row(tb: Table, cells_before: list, acc: list, style: str | None = None):
-    """数字指标行：末 8 列为 净输入/缓存读/命中率/输出/总/调用/单次成本/成本（总=净+缓存+输出）。
+def _per_mtok_s(cost: float, total: int, known: bool) -> str:
+    """每百万 tokens 开销单元格：成本 ÷ 总 tokens × 1M；无 tokens 显示 “-”，无定价加 “*”。"""
+    if not total:
+        return "-"
+    u = cost / total * 1_000_000
+    s = f"${u:,.2f}" if u >= 1 else (f"${u:.4f}" if u >= 0.01 else f"${u:.6f}")
+    return s + ("" if known else "*")
 
-    cells_before 为数字列之前的单元格（标签+留空），其长度 + 8 必须等于表格列数；
+
+def _metric_row(tb: Table, cells_before: list, acc: list, style: str | None = None):
+    """数字指标行：末 9 列为 净输入/缓存读/命中率/输出/总/调用/单次成本/每百万 tokens/成本。
+
+    cells_before 为数字列之前的单元格（标签+留空），其长度 + 9 必须等于表格列数；
     不匹配说明调用方列布局写错了（rich 会静默加宽表格导致错位），直接断言拦截。
     """
-    assert len(tb.columns) == len(cells_before) + 8, \
-        f"列布局不匹配: 表格 {len(tb.columns)} 列 vs 前置 {len(cells_before)} + 8 数字列"
+    assert len(tb.columns) == len(cells_before) + 9, \
+        f"列布局不匹配: 表格 {len(tb.columns)} 列 vs 前置 {len(cells_before)} + 9 数字列"
     net, cached, out, calls, cost, known = acc
+    total = net + cached + out
     vals = [f"{net:,}", f"{cached:,}", _hit_s(net, cached), f"{out:,}",
-            f"{net + cached + out:,}", f"{calls:,}", _unit_cost_s(cost, calls, known),
+            f"{total:,}", f"{calls:,}", _unit_cost_s(cost, calls, known),
+            _per_mtok_s(cost, total, known),
             f"${cost:,.2f}" + ("" if known else "*")]
     tb.add_row(*cells_before, *(Text(v, style=style) for v in vals))
 
 
 def _add_metric_columns(tb: Table):
-    for col in ("净输入", "缓存读", "命中率", "输出", "总 tokens", "调用", "单次成本", "成本"):
+    for col in ("净输入", "缓存读", "命中率", "输出", "总 tokens", "调用",
+                "单次成本", "每百万 tokens", "成本"):
         tb.add_column(col, justify="right")
 
 
@@ -265,7 +277,8 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
             groups[stats.fmt_dt(r)[0]].append(r)
         for day in sorted(groups):
             tb.add_section()
-            tb.add_row(Text(f"──────── {day} ────────", style="bold"), "", "", "", "", "", "", "", "")
+            tb.add_row(Text(f"──────── {day} ────────", style="bold"),
+                       "", "", "", "", "", "", "", "", "")
             acc = emit_group(groups[day], tb)
             tb.add_section()
             _metric_row(tb, [Text(f"小计 {day}", style="bold"), "", "", "", ""], acc, style="bold")

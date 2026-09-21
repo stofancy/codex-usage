@@ -79,6 +79,7 @@ codex-usage --update-pricing                         # 刷新本地定价缓存�
 | 总 tokens | 净输入 + 缓存读 + 输出 |
 | 调用 | API 调用次数（`token_count` 轮次，按当时模型归因） |
 | 单次成本 | 成本 ÷ 调用次数；无调用显示 `-` |
+| 每百万 tokens | 成本 ÷ 总 tokens × 1,000,000，即缓存折抵后的**混合有效单价**；聚合按 Σ成本 ÷ Σ总 tokens **加权**（不平均各行单位价）；无 tokens 显示 `-`，无定价加 `*` |
 | 成本 | 按定价表折算；无定价模型计 $0 并标 `*` |
 
 ### 计量口径
@@ -100,7 +101,7 @@ token 取自 rollout 里 `token_count.total_token_usage` 的**累计值快照**�
 | 聚合 | `--by-day` `--by-model` | 决定行粒度；可组合成 天×模型 |
 | 结构 | `--family` `--raw` | 家族树 / 文件粒度实体 |
 | 过滤 | `--since` `--until` `--type` `--model` `--session` `--parent` `--archived` | 只缩小范围，不改变行粒度 |
-| 图表 | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|hit\|output\|total` `--ascii` | 数据来自聚合维度，`--ascii` 强制字符画；`--metric hit` 是缓存命中率（0~1 比率），不能与 `--chart pie` 组合 |
+| 图表 | `--chart pie\|bar\|area\|line` `--metric cost\|input\|cache\|hit\|output\|total\|per_mtok` `--ascii` | 数据来自聚合维度，`--ascii` 强制字符画；`--metric hit` 是缓存命中率（0~1 比率），不能与 `--chart pie` 组合 |
 | 输出 | `--json` | 会话级 JSON Lines，含按模型明细（含调用次数），与其他参数兼容 |
 | 自述 | `--schema` `--doctor` | 机器可读契约 / 环境自检，优先于其它参数 |
 

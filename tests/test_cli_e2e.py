@@ -298,3 +298,23 @@ def test_metric_hit_in_json_chart_and_pie_rejection(env):
     r = run(env, "--chart", "pie", "--metric", "hit")
     assert r.returncode == 2
     assert "不支持" in r.stderr
+
+
+def test_metric_per_mtok_in_json_chart_and_pie_rejection(env):
+    """每百万 tokens 开销：--json 带字段（会话级+模型级）、可作图表指标、饼图拒绝。"""
+    r = run(env, "--json")
+    assert r.returncode == 0, r.stderr[-300:]
+    rows = [json.loads(x) for x in r.stdout.splitlines()]
+    assert rows
+    for row in rows:
+        v = row["cost_per_million_tokens"]
+        assert v is None or v >= 0
+        for m in row["models"].values():
+            assert "cost_per_million_tokens" in m
+
+    r = run(env, "--chart", "bar", "--metric", "per_mtok")
+    assert r.returncode == 0, r.stderr[-300:]
+
+    r = run(env, "--chart", "pie", "--metric", "per_mtok")
+    assert r.returncode == 2
+    assert "不支持" in r.stderr

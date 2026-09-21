@@ -149,3 +149,26 @@ def test_hit_rate_edges_and_weighting():
 
     assert tables._hit_s(0, 0) == "-"            # 无输入不显示 0%
     assert tables._hit_s(1, 3) == "75.0%"
+
+
+def test_unit_cost_per_mtok_edges_and_weighting():
+    """每百万 tokens 开销：成本 ÷ 总 tokens × 1e6；无 tokens 返回 None；聚合必须加权。"""
+    from codex_usage import stats
+    from codex_usage.render import charts, tables
+
+    assert stats.unit_cost_per_mtok(0.0, 0) is None
+    assert abs(stats.unit_cost_per_mtok(1.0, 1_000_000) - 1.0) < 1e-12
+    assert abs(stats.unit_cost_per_mtok(2.0, 500_000) - 4.0) < 1e-12
+
+    # 小样本高价行（100K tokens → $50/M）与大样本低价行（100M → $0.1/M）：
+    a1 = [0, 0, 100_000, 1, 5.0, True, 1]
+    a2 = [90_000_000, 0, 10_000_000, 1, 10.0, True, 1]
+    merged = [x + y for x, y in zip(a1, a2)]
+    weighted = charts.metric_of(merged, "per_mtok")
+    naive = (charts.metric_of(a1, "per_mtok") + charts.metric_of(a2, "per_mtok")) / 2
+    assert abs(weighted - 15.0 / 100_100_000 * 1_000_000) < 1e-9
+    assert weighted < naive / 10                 # 直接平均会被小样本带偏两个量级
+
+    assert tables._per_mtok_s(0.0, 0, True) == "-"          # 无 tokens 不显示 $0
+    assert tables._per_mtok_s(1.0, 1_000_000, True) == "$1.00"
+    assert tables._per_mtok_s(1.0, 1_000_000, False) == "$1.00*"   # 无定价仍带 *

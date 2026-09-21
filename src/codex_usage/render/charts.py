@@ -11,9 +11,12 @@ import shutil
 import plotext as plt
 from termcharts import pie as tc_pie
 
-METRICS = ("cost", "input", "cache", "hit", "output", "total")
+METRICS = ("cost", "input", "cache", "hit", "output", "total", "per_mtok")
 METRIC_LABEL = {"cost": "成本(USD)", "input": "净输入", "cache": "缓存读",
-                "hit": "缓存命中率", "output": "输出", "total": "总 tokens"}
+                "hit": "缓存命中率", "output": "输出", "total": "总 tokens",
+                "per_mtok": "每百万 tokens(USD)"}
+# 比率/单位价指标不能做“占总量的份额”，饼图直接拒绝
+PIE_UNSUPPORTED = ("hit", "per_mtok")
 
 # 字符画用的 ASCII 词表（长词在前，避免部分覆盖）
 _ASCII_WORDS = (
@@ -23,6 +26,7 @@ _ASCII_WORDS = (
     ("每天", "per day "),
     ("各模型", "by model "),
     ("成本(USD)", "cost (USD)"),
+    ("每百万 tokens(USD)", "per 1M tokens (USD)"),
     ("缓存命中率", "cache hit rate"),
     ("净输入", "input"),
     ("缓存读", "cache read"),
@@ -48,6 +52,9 @@ def metric_of(entry: list, metric: str) -> float:
     if metric == "hit":
         gross = net + cached
         return cached / gross if gross else 0.0
+    if metric == "per_mtok":
+        total = net + cached + out
+        return cost / total * 1_000_000 if total else 0.0
     return {"cost": cost, "input": net, "cache": cached,
             "output": out, "total": net + cached + out}[metric]
 

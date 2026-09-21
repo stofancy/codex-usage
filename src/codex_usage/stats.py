@@ -68,6 +68,15 @@ def rec_hit(rec: Session) -> float | None:
     return hit_rate(gin - ca, ca)
 
 
+def unit_cost_per_mtok(cost: float, total: int) -> float | None:
+    """每百万 tokens 开销（USD / 1M tokens），按总 tokens（= 毛输入 + 输出）折算。
+
+    聚合时按 Σ成本 ÷ Σ总 tokens 重算——平均各行的单位价会被小样本行带偏。
+    没有 tokens 时返回 None（调用方显示 “-”）。
+    """
+    return cost / total * 1_000_000 if total else None
+
+
 def rec_calls(rec: Session) -> int:
     """API 调用次数（token_count 轮次）。"""
     return sum(v[4] for v in rec.models.values())

@@ -101,6 +101,9 @@ _JSON_FIELDS = {
     "cache_read": {"type": "integer", "unit": "tokens", "meaning": "缓存读"},
     "cache_hit_rate": {"type": "number|null", "meaning": "缓存命中率 = 缓存读 / 毛输入，0~1；"
                                                        "无输入时为 null"},
+    "cost_per_million_tokens": {"type": "number|null", "unit": "USD/1M tokens",
+                                "meaning": "每百万 tokens 开销 = 成本 ÷ 总 tokens × 1e6；"
+                                           "无 tokens 时为 null"},
     "output": {"type": "integer", "unit": "tokens", "meaning": "输出"},
     "total_tokens": {"type": "integer", "unit": "tokens", "meaning": "毛输入 + 输出 = 净输入 + 缓存读 + 输出"},
     "calls": {"type": "integer", "meaning": "API 调用次数（token_count 轮次）"},
@@ -119,6 +122,9 @@ _MODEL_FIELDS = {
     "cached": {"type": "integer", "unit": "tokens", "meaning": "缓存读"},
     "cache_hit_rate": {"type": "number|null", "meaning": "该模型缓存命中率 = 缓存读 / 毛输入，0~1；"
                                                        "无输入时为 null"},
+    "cost_per_million_tokens": {"type": "number|null", "unit": "USD/1M tokens",
+                                "meaning": "该模型每百万 tokens 开销（按总 tokens 折算）；"
+                                           "无 tokens 时为 null"},
     "output": {"type": "integer", "unit": "tokens", "meaning": "输出"},
     "reasoning": {"type": "integer", "unit": "tokens", "meaning": "推理输出"},
     "calls": {"type": "integer", "meaning": "该模型参与调用的轮次"},
@@ -132,9 +138,13 @@ _METRICS = {
                                        "聚合按 Σ缓存读 / Σ毛输入 加权，不是平均百分比"},
     "output": {"axis": "tokens", "meaning": "输出"},
     "total": {"axis": "tokens", "meaning": "总 tokens = 净输入 + 缓存读 + 输出"},
+    "per_mtok": {"axis": "USD/1M tokens", "meaning": "每百万 tokens 开销 = 成本 ÷ 总 tokens × 1e6；"
+                                                    "聚合按 Σ成本 ÷ Σ总 tokens 加权，不是平均各行单位价；"
+                                                    "与 hit 一样不能与 --chart pie 组合"},
 }
 
-_TABLE_COLUMNS = ["净输入", "缓存读", "命中率", "输出", "总 tokens", "调用", "单次成本", "成本"]
+_TABLE_COLUMNS = ["净输入", "缓存读", "命中率", "输出", "总 tokens", "调用",
+                  "单次成本", "每百万 tokens", "成本"]
 
 _DATA_SOURCES = {
     "sessions_dir": {"env": "CODEX_USAGE_SESSIONS_DIR", "default": "~/.codex/sessions",
