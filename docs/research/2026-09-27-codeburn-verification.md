@@ -175,3 +175,52 @@ CodeBurn包仍依赖React/Ink等。采用它的静态入口能满足轻量交互
 未进行：全量历史审计、所有harness验证、完整Web运行、在线价格更新、CJK全终端矩阵、性能基准、完整安全审查。没有编写或修改产品测试，也没有实施修复。
 
 临时证据：`/tmp/codeburn-capabilities/` 的命令输出与PTY结果；`/tmp/codeburn-metering/` 的合成生成脚本、report/export结果；源码克隆保留便于复查。研究报告只保存结构和统计数值，不提交真实日志/正文。临时Rich探针和第三方源码不是项目产品交付，不纳入源码目录。
+
+## 9. 后续补测：本机真实七种harness与正式安装
+
+用户进一步要求验证多来源并安装供手动试用。本轮重点由“是否完整替代Codex专项能力”转向“本机多来源能否真正读取”，两者不应混为一谈。
+
+### 安装与入口
+
+- npm registry当前版本0.9.25，与之前源码版本一致。
+- `npm install -g codeburn@0.9.25 --ignore-scripts --no-audit --no-fund` 成功，新增163个包；安装在用户自己的nvm前缀，无sudo。
+- 可执行文件 `/home/ztmdsbt/.nvm/versions/node/v24.18.0/bin/codeburn`，普通shell及 `fish -ic 'command -v codeburn; codeburn --version'` 均成功返回0.9.25。切换nvm Node版本后可能需重新安装。
+- `codeburn web --no-open --period today --port 4747` 实际启动，HTTP首页返回CodeBurn HTML；验证后停止，不留后台服务。此为启动/资源烟测，不是完整浏览器交互验收。
+
+### 真实来源结果
+
+使用真实HOME自动发现来源，统计缓存指定临时目录 `/tmp/codeburn-live-verification-cache`，价格仍用 `CODEBURN_PRICING_SNAPSHOT_ONLY=1` 测试变量；没有启用上传或辅助改配置功能。
+
+`doctor --json` 检测41种provider定义，其中7种发现本机数据；每种抽样最多8条，所有抽样解析成功。这里的发现文件/候选数不是最终会话数，不据此声称每条数据均解析正确。
+
+正式安装版执行 `codeburn report --period lifetime --format json`：退出0，首次约19.19秒，汇总162,536 calls、21,973,155,358 tokens。随后分别指定 `--provider` 执行同一命令，全部退出0：
+
+| 本机来源 | calls | tokens（四分量相加） | 报告费用USD | 缺价模型数 |
+|---|---:|---:|---:|---:|
+| Claude Code | 1,785 | 286,362,259 | 194.2151 | 0 |
+| Codex | 111,603 | 14,387,573,152 | 10,800.3834 | 2 |
+| DeepSeek Harness | 6,358 | 1,063,424,023 | 9.5874 | 2 |
+| Grok Build | 75 | 146,433,902 | 75.4413 | 0 |
+| OMP | 19,142 | 2,824,731,778 | 2,318.5937 | 0 |
+| OpenCode | 2,250 | 425,579,537 | 0 | 4 |
+| ZCode | 21,324 | 2,839,310,459 | 646.2703 | 5 |
+
+重要边界：
+
+1. **七种本机真实来源都能统计，不只是支持名单或合成OMP测试。** 上述calls是各parser报告的计量条目，不能统一解释为真实网络请求次数。
+2. 费用是CodeBurn报告值，不是账单；有缺价。尤其OpenCode用量非零但费用0，不能解读成免费。
+3. DSH明确警告部分attempt没有usage，统计可能不完整；不把成功退出等同完整覆盖。
+4. 所有来源的sessionCountBasis均为partial；OMP顶层model_usage缺口仍然存在，本次不再逐条复算。
+5. 全来源与逐来源是先后运行、源日志仍在追加，并非冻结快照。逐来源相加多1 call、259,752 tokens；可能来自期间新增记录，未定位差值，不宣称两次完全对账通过。
+6. 本轮证明实际发现、解析、聚合与输出可用，没有证明每个来源的计量口径、费用或所有历史记录都准确。Codex上一轮固定窗口对账与合成缺陷结论仍独立有效。
+
+手动体验（fish/Bash通用）：
+
+```sh
+codeburn overview --period lifetime --no-color
+codeburn report --provider omp --period lifetime --format json
+codeburn doctor
+codeburn web --period lifetime
+```
+
+不带子命令的 `codeburn` 是交互终端仪表盘；偏好轻量输出时先用overview。普通运行未设置本轮测试变量，会按默认策略更新价格，可能访问在线价格源；这不同于上传聊天记录，本轮未作全面网络审计。
