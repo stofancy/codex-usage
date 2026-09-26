@@ -1,14 +1,14 @@
 # 本地浏览器 UI 与 TUI 方案研究
 
-日期：2026-09-27。状态：研究与推荐方案，未实现界面、未做视觉验收。用户已确认：**单机本地、本地浏览器、Web UI 与 TUI 同等重要**。
+日期：2026-09-27。状态：研究与推荐方案，未实现产品界面。用户已确认单机本地、本地浏览器与终端同等重要；后续明确否决 Textual 全屏方向，要求参考 ccusage 的轻量终端工具。本文据此修订，不再将全屏应用或交互镜像列为要求。
 
 ## 1. 产品边界
 
-两个入口必须都能独立完成：看总览 → 选时间/来源/模型/项目 → 查看会话 → 追溯子代理和调用 → 检查数据覆盖与价格依据。功能对等不意味着像素、布局和手势相同，也不意味着 TUI 必须有网页同款图表。
+两个入口共用计量与查询口径，但不强求交互镜像。网页承担深入交互；终端通过一次性命令、筛选参数、会话详情报表与 JSON 完成查询，保留滚动历史。终端重要不等于需要一个全屏应用。
 
 - Web 承担鼠标友好的趋势选择、高密度比较、表格和详情联动。
-- TUI 承担键盘优先、SSH/tmux 环境中的快速分析；不要求图片协议。
-- CLI report/JSON 是批处理、脚本、管道入口，不冒充交互式 TUI。
+- 终端采用 ccusage 式执行即退出、响应式表格/紧凑列表；适合 SSH/tmux、复制、管道。
+- 复用现有 Rich 输出能力，不引入 Textual、不接管键盘、不建立多页焦点状态机。
 - 本轮不做桌面壳、账号、多机汇总、团队权限、预算拦截、聊天全文搜索、LLM 自动归因。
 
 ## 2. 现有输出为什么不能套壳复用
@@ -17,8 +17,8 @@
 
 源码补充说明：
 
-- `render/tables.py` 固定度量列，许多视图同时展示大量指标； `_metric_row` 依赖 `cells_before + 9`。这是打印表格，不是有焦点、选中、滚动、详情的屏幕。
-- `render/charts.py` 已按终端列数计算图宽，**不能说完全没有尺寸处理**；但图高固定、字符图为一次性字符串，不能代替动态重排的全屏应用。其最小图宽也不等于窄屏可操作策略。
+- `render/tables.py` 固定度量列，许多视图同时展示大量指标；`_metric_row` 依赖 `cells_before + 9`。需要改变列预算和信息密度，不需要因为它是打印表格而替换成全屏应用。
+- `render/charts.py` 已按终端列数计算图宽，不能说完全没有尺寸处理；但本轮替代能力比较已明确排除所有绘图。
 - `cli.py` 直接分派不同 renderer，部分图表/JSON 成本自行计算。新界面必须消费统一数值，不能各自复制计算。
 - `stats.apply_filters` 原地修改模型集合。常驻进程若缓存并复用这些对象，会污染后续查询；共享核心需要无副作用查询。
 
@@ -99,55 +99,35 @@
 
 共同验收：纯键盘能完成筛选、排序、详情和返回；焦点可见；关闭弹层恢复焦点；状态不只靠颜色；遵循 [WCAG Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html)。追溯树如用 treegrid，遵循 [APG treegrid](https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/)，不能仅添加 ARIA 属性而不实现键盘行为。
 
-## 5. TUI 技术选型
+## 5. 轻量终端技术选择
 
-| 框架 | 能力与证据 | 对当前项目代价 | 建议 |
-|---|---|---|---|
-| Textual + Rich | Python；Grid/滚动/focus/键鼠/断点；Pilot 可模拟尺寸与操作 | 同语言，仍需学习事件/异步布局；实际 CJK 与终端清理必须实测 | 首选 |
-| Ratatui | Rust 约束布局、frame resize、Crossterm、TestBackend；Tokscale 使用 | 跨语言共享核心和分发成本高 | 有已证实性能瓶颈再考虑 |
-| Bubble Tea | Go Elm 状态模型，WindowSizeMsg，键鼠和 alternate screen | 新增 Go 程序及协议边界 | 不为审美单独重写 |
-| Ink | React/Yoga/Flexbox，键盘与测试工具 | 新增 Node，和 Python 核心分离；文档 master 与发布版须区分 | 更适合已有 TS 核心的项目 |
+推荐保留 Python + Rich，重做报表布局，而不是换全屏框架。Textual、Ratatui、Bubble Tea 和 Ink 可实现复杂交互，但当前不以这类应用模型作为终端目标。也不将用户认为“重”误写成未经测量的 CPU/内存结论：这里首先是交互、依赖与维护边界。
 
-这些框架都不能保证所有终端的中文、emoji、组合字宽度完全一致。必须测目标终端，不能用“支持 Unicode”代替兼容性验证。
+[ccusage 官方说明](https://github.com/ccusage/ccusage/blob/main/apps/ccusage/README.md) 明确一次性 daily/weekly/monthly/session 报表、JSON、窄终端自动 compact（文档阈值 100 列）和 `--compact`。值得借鉴的是执行模式和列策略，而不是照搬具体阈值或技术栈。
 
-来源：[Textual 布局](https://textual.textualize.io/guide/layout/)、[输入](https://textual.textualize.io/guide/input/)、[App 断点](https://textual.textualize.io/api/app/)、[测试](https://textual.textualize.io/guide/testing/)；[Ratatui 布局](https://ratatui.rs/concepts/layout/)、[后端](https://ratatui.rs/concepts/backends/)；[Bubble Tea](https://github.com/charmbracelet/bubbletea)、[resize 事件](https://github.com/charmbracelet/bubbletea/blob/main/screen.go)；[Ink](https://github.com/vadimdemedes/ink)。不在方案阶段锁定未经运行验证的最新版依赖。
+[Rich Console](https://rich.readthedocs.io/en/stable/console.html) 已提供当前终端尺寸、TTY/颜色检测与宽字符排版；不需要为了响应式输出增加 Textual。
 
-## 6. TUI 屏幕与交互设计
+## 6. 终端输出契约
 
-```text
-范围 / 时区 / 来源筛选                  分组 / 数据状态
-Tokens · 已知估算成本 · 缺价提示
-────────────────────────────────────────────────────
-当前分组列表                         │ 选中项详情（宽屏）
-名称             Tokens   成本       │ 完整身份、缓存、用途
-> 当前项                              │ 下钻/来源依据
-────────────────────────────────────────────────────
-筛选摘要 / 行数        /筛选  Enter详情  Esc返回  ?帮助  q退出
-```
+- 默认打印一次并退出，不清屏、不进入 alternate screen、不隐藏光标、不捕获键盘；结果留在滚动历史中。
+- 宽终端显示更多指标，中等宽度保留名称、tokens、成本与必要状态；窄终端转为分块/纵向字段，不把所有列挤进一行。
+- 列隐藏只改变显示，不改变筛选或数值；完整指标可通过详情报表/JSON查询。显示缩写金额或 K/M 数值时标明展示精度，JSON保持精确。
+- 名称优先可识别；过长时换行或在详情输出完整值，不把多个模型都截成同一前缀。
+- 输出前探测宽度，允许显式 width/compact 覆盖。已经打印进历史的表格不能在进程退出后重新计算列；终端自身重流与应用动态重排是两回事。扩大后重新执行即可得到新布局。
+- 高度不作为强制全屏预算，不自动截断结果；长报表使用终端历史或用户显式的外部分页器。不默认进入分页器。
+- 过滤和下钻用参数或独立详情命令，不做焦点、弹层、快捷键页面。
+- 非TTY默认无色、无控制序列；JSON不受列宽影响。纯文本管道不固定250列伪装响应式；需另行定义稳定可读的换行策略。
+- watch不是默认需求。若未来确认需要，单独设计当前屏幕内的有限刷新，不能把“可选watch”偷换成全屏TUI。
+- 本轮用临时Rich探针验证尺寸/中文/管道边界，具体实测见后续轻量终端报告；不据框架文档承诺所有终端兼容。
 
-- **≥120×35**：左右分栏；主要列为名称/身份、tokens、成本与性质、调用；趋势仅占有限高度。
-- **80×24**：单栏，详情另开屏；名称、tokens、成本优先，调用/命中率/输入输出分量进入详情。
-- **60×20**：紧凑列表，名称占独立行，数值不互相挤压；所有隐藏指标仍可进入详情读取。
-- **<50 列或 <10 行**：提示扩大窗口，不越界，不丢退出键；这是待验证的最小可用尺寸建议。
-- 断点同时考虑宽度和高度，不把“足够宽但很矮”错误判断成完整双栏。
-
-按键：箭头/jk 选行，PgUp/PgDn 翻页，Home/End 首尾；Enter 详情/明确下钻，Esc 返回；`/` 搜索，`f` 筛选，`s` 排序，`?` 帮助，`q` 退出。输入框聚焦时字母不会误触全局命令。鼠标只作增强。
-
-resize 保留选中记录的稳定键、筛选、排序，按新尺寸重新定位视口。返回上层保留上下文。无色模式用文字/光标/边界区分选中和警告。
-
-**不使用** kitty TGP、Sixel、halfcell 或嵌入 matplotlib 图片。字符趋势只作辅助；数字、清晰列表、可下钻才是主体。不沿用当前大图 renderer 作为 widget。
-
-`NO_COLOR` 禁用色彩但保留交互控制；显式 TUI 在非 TTY 下清晰报错并提示 report/JSON，绝不向管道写 alternate-screen 控制序列。退出、Ctrl-C 和异常均恢复光标、raw mode、鼠标捕获与原屏幕。
-
-竞品交互参考：[Anthropometer](https://github.com/arian-shamaei/anthropometer) 的视图切换、session picker、Enter 子代理下钻和 Backspace 返回；[Tokscale](https://github.com/junhoyeo/tokscale) 的多页 TUI 与模型列表。官方截图只证明布局参考，不证明当前版本在 80×24 或用户终端已通过。
 
 ## 7. 共用核心与推荐实现栈
 
-**推荐而非已实施：Python 查询/索引核心 + 本地 HTTP API + TypeScript/React 网页 + Textual TUI。**
+**推荐而非已实施：Python 查询/索引核心 + 本地 HTTP API + TypeScript/React 网页 + Rich 轻量终端报表。**
 
 - Python 继续承接现有 Codex 计量知识，但调用级记录、纯查询、费用状态需要改造，不能原封不动复用 `Session`。
 - SQLite 自有可重建索引，支持两端启动和重复筛选。读取查询不全量解析源日志。已观察秒级扫描，因此建议纳入方案；增量细节先用代表性数据探针确定，不先建常驻 daemon。
-- `Summary / Breakdown / Series / SessionDetail / Calls / Coverage` 是共享查询结果。TUI 在进程内使用；Web 仅包装为 JSON。
+- `Summary / Breakdown / Series / SessionDetail / Calls / Coverage` 是共享查询结果。终端在进程内查询并输出报表；Web 通过 JSON 访问，不互相解析文本。
 - 共同 `FilterState`：时间/时区、harness、provider、model、project、session、agent kind、purpose、tier、分组、排序、分页。所有响应带快照版本和完整性。
 - 前端构建产物随 Python 包发行，终端用户不需 Node；不使用 CDN。React 是复杂交互状态下的常规选择，不需要 SSR/Next.js。
 - HTTP 推荐小型 ASGI 应用，复用成熟请求/响应与中间件能力，不自写一套 `http.server` 安全框架。FastAPI/Starlette 具体依赖需在实施计划中锁定；这不改变查询核心。
@@ -156,7 +136,7 @@ resize 保留选中记录的稳定键、筛选、排序，按新尺寸重新定�
 - 项目先按来源记录的完整 cwd 区分，不只用 basename；git root/worktree 合并需要明示规则，不能默默把不同项目并在一起。
 - 默认中文文案与原始技术标识，不在本轮追加完整国际化平台。
 
-未来入口名暂用 `web`、`tui`、`report`、`--json` 表达职责；产品改名/旧命令清理属于实施前决策，本轮不创建别名或兼容层。
+未来入口区分本地 Web、一次性终端报表和 JSON，不预设新增 `tui` 命令。产品命名与旧命令迁移属于实施前决策，本轮不创建别名或兼容层。
 
 ## 8. 本地网页安全与生命周期
 
@@ -181,7 +161,7 @@ resize 保留选中记录的稳定键、筛选、排序，按新尺寸重新定�
 ## 10. 后续验收矩阵
 
 - Web：1280+、1024、768、320px；缩放、长中文/模型名、仅键盘、空态/部分失败/未定价；真实浏览器检查，而非只看截图。
-- TUI：120×35、80×24、60×20、极小窗口；连续 resize、中文宽字符、NO_COLOR、SSH/tmux、无鼠标、正常/异常退出；真实 PTY 验证，headless 截图只能补充。
+- 终端：120/80/60/40列、中文宽字符、NO_COLOR、pipe/JSON；实测每次输出按宽度选择布局，无清屏/备用屏幕/键盘捕获。退出后的历史不要求动态重排。
 - 两端：同一快照/筛选/时区/价格基准，记录集合、分组小计、趋势总计、家族边界、费用状态一致。
 - 性能目标建议：已索引后的常用筛选在代表性本机数据上 P95 ≤200ms，显示反馈不等待全量重扫；首次索引显示进度，可取消。这是验收目标，不是已实现结果。
 - 单源失败不隐瞒；数据与价格缺失不填假零；扫描更新不抢焦点。
@@ -189,7 +169,7 @@ resize 保留选中记录的稳定键、筛选、排序，按新尺寸重新定�
 
 ## 11. 主代理对研究建议的裁决
 
-- 采纳两端平等、账本首页、调用级记录、用途/覆盖展示、Textual、共享查询。
+- 采纳两端都重要、账本首页、调用级记录、用途/覆盖展示、共享查询；按用户最新指示撤回 Textual 和全屏 TUI 推荐，改用轻量报表。
 - 不采纳“永远保留所有旧图表实现”的默认建议。若正式选择新双入口，旧终端图片路径可在明确切换批次整体退役，不做长期双轨。
 - 不采纳“账单实际是首屏必备卡片”：目前没有此数据来源。
 - 不采纳“关闭标签页即停止服务”：该生命周期不可靠。
