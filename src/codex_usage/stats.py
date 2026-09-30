@@ -9,16 +9,20 @@ from .parser import Session
 from .pricing import default_service_tier, model_cost
 
 
-def _cost_by_tier(rec: Session, mname: str, slot: list[int], pricing: dict,
-                  config_tier: str) -> float | None:
+def rec_model_cost(rec: Session, mname: str, pricing: dict,
+                   config_tier: str | None = None) -> float | None:
     """该模型成本：有档位明细就逐档计价（priority/Fast 与标准价不同），否则整块计价。
 
     无价返回 None（调用方按 $0 计并标 *）。`unknown` 档由定价层按 config.toml 的
     service_tier 处理，所以这里把档位原值原样传下去。
     """
+    slot = rec.models[mname]
+    if config_tier is None:
+        config_tier = default_service_tier()
     tiers = (rec.tiers or {}).get(mname)
     if not tiers:
-        return model_cost(pricing, mname, slot[0] - slot[1], slot[1], slot[2])
+        return model_cost(pricing, mname, slot[0] - slot[1], slot[1], slot[2],
+                          config_tier=config_tier)
     total, priced = 0.0, True
     for tier, tslot in tiers.items():
         c = model_cost(pricing, mname, tslot[0] - tslot[1], tslot[1], tslot[2],
@@ -43,8 +47,8 @@ def rec_cost(rec: Session, pricing: dict) -> tuple[float, bool]:
     """(成本[无定价按 $0], 是否全部模型有定价)"""
     cfg = default_service_tier()
     total, known = 0.0, True
-    for mname, v in rec.models.items():
-        c = _cost_by_tier(rec, mname, v, pricing, cfg)
+    for mname in rec.models:
+        c = rec_model_cost(rec, mname, pricing, cfg)
         if c is None:
             known = False
         else:
@@ -89,7 +93,7 @@ def aggregate_models(recs: list[Session], pricing: dict) -> dict[str, list]:
     for r in recs:
         seen = set()
         for mname, v in r.models.items():
-            c = _cost_by_tier(r, mname, v, pricing, cfg)
+            c = rec_model_cost(r, mname, pricing, cfg)
             a = agg.setdefault(mname, [0, 0, 0, 0, 0.0, True, 0])
             a[0] += v[0] - v[1]
             a[1] += v[1]

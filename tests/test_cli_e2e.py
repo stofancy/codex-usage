@@ -3,16 +3,138 @@
 import json
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+
+import pytest
 
 
 MOD = "codex_usage.cli"
+
+
+@pytest.fixture
+def mixed_fast_recs(tmp_path, monkeypatch):
+    from codex_usage.parser import Session
+    from codex_usage import pricing
+
+    monkeypatch.setenv("CODEX_USAGE_CODEX_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("CODEX_USAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CODEX_USAGE_PRICING_FILE", str(tmp_path / "prices.json"))
+    pricing.default_service_tier.cache_clear()
+    model = "gpt-6.1-sol"
+    recs = []
+    for i, (tier, slot) in enumerate([
+        ("standard", [2_000_000, 1_500_000, 100_000, 50_000, 1]),
+        ("fast", [1_000_000, 250_000, 200_000, 100_000, 1]),
+    ]):
+        r = Session(file="f", sid=str(i), uuids=[str(i)],
+                    first_local=datetime(2026, 9, 30), models={model: slot},
+                    tiers={model: {tier: slot}})
+        recs.append(r)
+    yield recs, pricing.load_pricing()
+    pricing.default_service_tier.cache_clear()
+
+
+def test_json_model_unit_price_uses_recorded_tiers(mixed_fast_recs, capsys):
+    from codex_usage import cli
+
+    recs, table = mixed_fast_recs
+    cli._emit_json(recs, table)
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    for row, expected in zip(rows, [2.15, 7.05]):
+        assert row["cost_usd_known"] == pytest.approx(expected)
+        unit = round(expected / row["total_tokens"] * 1_000_000, 4)
+        assert row["cost_per_million_tokens"] == pytest.approx(unit)
+        assert row["models"]["gpt-6.1-sol"]["cost_per_million_tokens"] == pytest.approx(unit)
+
+
+@pytest.mark.parametrize("chart", ["bar", "area", "line"])
+@pytest.mark.parametrize("metric,expected", [
+    ("cost", 9.2),
+    ("per_mtok", 9.2 / 3.3),
+    ("hit", 1.75 / 3.0),
+    ("total", 3_300_000),
+])
+def test_model_day_charts_use_tier_costs_and_weighted_ratios(
+        mixed_fast_recs, chart, metric, expected):
+    from codex_usage import cli
+
+    recs, table = mixed_fast_recs
+    args = cli.build_parser().parse_args([
+        "--chart", chart, "--by-day", "--by-model", "--metric", metric])
+    captured = []
+
+    class Render:
+        @staticmethod
+        def chart_bar(labels, series, **kwargs):
+            captured.append(series)
+
+        @staticmethod
+        def chart_series(kind, labels, series, **kwargs):
+            captured.append(series)
+
+    cli._chart_draw(args, recs, table, Render, lambda result: None)
+    assert captured == [{"gpt-6.1-sol": [pytest.approx(round(expected, 4))]}]
 
 
 def run(env, *args, code="2026-09-10", until="2026-09-11"):
     return subprocess.run(
         [sys.executable, "-m", MOD, "--since", code, "--until", until, *args],
         capture_output=True, text=True, env=None)
+
+
+@pytest.mark.parametrize("initial_tier,expected", [("default", 9.2), (None, 11.35)])
+def test_fast_pricing_cli_switches_and_config_fallback(tmp_path, monkeypatch,
+                                                     initial_tier, expected):
+    """真实 CLI 从 rollout 取档位：显式 Standard 保留，unknown 才使用 Fast 配置。"""
+    from codex_usage import pricing
+
+    sess = tmp_path / "sessions" / "2026" / "09" / "30"
+    sess.mkdir(parents=True)
+    config = tmp_path / "config.toml"
+    config.write_text('service_tier = "fast"\n')
+    monkeypatch.setenv("CODEX_USAGE_CODEX_CONFIG", str(config))
+    monkeypatch.setenv("CODEX_USAGE_SESSIONS_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("CODEX_USAGE_ARCHIVE_DIR", str(tmp_path / "archive"))
+    pricing.default_service_tier.cache_clear()
+    ts = datetime(2026, 9, 30, 10).astimezone(timezone.utc).isoformat()
+    body = []
+
+    def event(typ, payload):
+        body.append(json.dumps({"timestamp": ts, "type": typ, "payload": payload}))
+
+    def settings(tier):
+        event("event_msg", {"type": "thread_settings_applied",
+                            "thread_settings": {"service_tier": tier}})
+
+    def tokens(gross, cached, output, total):
+        event("event_msg", {"type": "token_count", "info": {
+            "last_token_usage": dict(input_tokens=gross, cached_input_tokens=cached,
+                                     output_tokens=output),
+            "total_token_usage": total}})
+
+    event("session_meta", {"thread_source": "user"})
+    event("turn_context", {"model": "gpt-6.1-sol"})
+    if initial_tier:
+        settings(initial_tier)
+    tokens(2_000_000, 1_500_000, 100_000,
+           dict(input_tokens=2_000_000, cached_input_tokens=1_500_000, output_tokens=100_000))
+    settings("fast")
+    tokens(1_000_000, 250_000, 200_000,
+           dict(input_tokens=3_000_000, cached_input_tokens=1_750_000, output_tokens=300_000))
+    path = sess / "rollout-2026-09-30T10-00-00-00000000-0000-0000-0000-000000000001.jsonl"
+    path.write_text("\n".join(body) + "\n")
+
+    result = run({}, "--json", code="2026-09-30", until="2026-09-30")
+    assert result.returncode == 0, result.stderr
+    row = json.loads(result.stdout)
+    assert row["total_tokens"] == 3_300_000
+    assert row["cost_usd_known"] == pytest.approx(expected)
+    assert row["pricing_full"] is True
+    assert row["models"]["gpt-6.1-sol"]["cost_per_million_tokens"] == pytest.approx(
+        round(expected / 3.3, 4))
+    result = run({}, "--by-model", code="2026-09-30", until="2026-09-30")
+    assert result.returncode == 0, result.stderr
+    assert f"${expected:.2f}" in result.stdout
 
 
 def test_views_no_crash_and_totals(env):
@@ -88,16 +210,14 @@ def test_model_metric_total_counts_cache_once():
     回归点：曾用 sum(v[:3])（毛输入已含缓存）导致 total 虚高。
     """
     from codex_usage import cli
-    from codex_usage.render import charts
+    from codex_usage.parser import Session
 
     v = [6000, 5000, 300, 150, 2]                       # 毛 6000（含缓存 5000）、出 300
-    entry = [v[0] - v[1], v[1], v[2], 0, 0.0, True, 1]  # aggregate_models 槽位
-    assert cli._model_metric("m", v, "input", {}) == 1000
-    assert cli._model_metric("m", v, "cache", {}) == 5000
-    assert cli._model_metric("m", v, "output", {}) == 300
-    assert cli._model_metric("m", v, "total", {}) == 6300
-    for metric in ("input", "cache", "output", "total"):
-        assert cli._model_metric("m", v, metric, {}) == charts.metric_of(entry, metric)
+    rec = Session(file="f", sid="s", uuids=["s"], models={"m": v},
+                  first_local=datetime(2026, 9, 30))
+    for metric, expected in [("input", 1000), ("cache", 5000), ("output", 300), ("total", 6300)]:
+        series = cli._model_day_series([rec], {}, ["2026-09-30"], metric)
+        assert series == {"m": [expected]}
 
 
 def test_new_metric_columns_and_alignment(env):

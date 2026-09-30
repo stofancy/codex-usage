@@ -98,6 +98,7 @@ _TIER_ALIASES = {"fast": TIER_PRIORITY, "priority": TIER_PRIORITY, "flex": TIER_
                  "default": TIER_STANDARD, "standard": TIER_STANDARD, "": TIER_STANDARD}
 #: 档位数据里标为 official 的模型（OpenAI 官方 Fast/Flex 价目表有独立行）。
 OFFICIAL_TIER_MODELS = frozenset({
+    "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
     "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
     "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2", "gpt-5.1", "gpt-5",
 })

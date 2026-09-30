@@ -8,6 +8,24 @@ from datetime import datetime, timezone
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolated_user_pricing(tmp_path, monkeypatch):
+    """所有测试与子进程使用临时配置，避免本机 Fast 设置影响合成价格。"""
+    from codex_usage import pricing
+
+    monkeypatch.setenv("CODEX_USAGE_CODEX_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("CODEX_USAGE_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("CODEX_USAGE_PRICING_FILE", str(tmp_path / "prices.json"))
+    for key in ("CODEX_USAGE_TIER_PRICING_FILE", "CODEX_USAGE_ALIASES_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    caches = (pricing.load_aliases, pricing.load_tier_pricing, pricing.default_service_tier)
+    for cached in caches:
+        cached.cache_clear()
+    yield
+    for cached in caches:
+        cached.cache_clear()
+
+
 def utc_at(y: int, mo: int, d: int, h: int, mi: int = 0) -> str:
     """按**本机时区**给出这些墙上时间，转成 rollout 里的 UTC 时间戳。
 

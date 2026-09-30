@@ -131,7 +131,7 @@ codex-usage --update-pricing --pricing-source litellm
 三个细节会影响算出来的数字：
 
 - **缓存读缺价**：生效合并表中约三分之一（33.6%）的条目没有 `cacheReadCostPerMillion`。这些模型的缓存读按该模型的 **input 价**计，而不是 $0——这是有意的上界（真实 cache read 价约为 input 的 10%），宁可多算也不会静默少算。
-- **服务档位**：Codex 会记录每一轮走的档位。`priority` 与 `fast` 是同一档（OpenAI 把 priority processing 改名为 Fast），按官方逐模型 Fast 价计——Astra 与 5.6 Sol/Terra/Luna 为标准的 2.0×、`gpt-5.5` 为 2.5×，`flex` 为 0.5×。价格口径是 **API 等价美元**，不是 ChatGPT 订阅 credits 的倍率（那是另一套价目表）。没有公开 Fast 价的模型（如 `gpt-5-codex`）保持标准价并标 `tier_priced: false`。
+- **服务档位**：Codex 会记录每一轮走的档位。`priority` 与 `fast` 是同一档（OpenAI 把 priority processing 改名为 Fast），按官方逐模型 Fast 价计——`gpt-6.1-sol`、GPT-6 Sol/Luna/Astra 与 5.6 Sol/Terra/Luna 为标准的 2.0×、`gpt-5.5` 为 2.5×，`flex` 为 0.5×。价格口径是 **API 等价美元**，不是 ChatGPT 订阅 credits 的倍率（那是另一套价目表）。没有公开 Fast 价的模型（如 `gpt-5-codex`）保持标准价并标 `tier_priced: false`。
 - **没有公开价的标签**：`codex-auto-review` 在任何公开渠道都没有价格字段，因此走一张可审计的别名表（`src/codex_usage/data/model_aliases.json`）映射到 `gpt-5.5`，并标 `assumed: true`（依据是 ccusage 按发布日的 fallback 表 + 三方 token 对账）。`gpt-reserve` 任何渠道都没有公开价，保持 `$0.00*`，不臆造。别名表与档位价表可分别用 `CODEX_USAGE_ALIASES_FILE`、`CODEX_USAGE_TIER_PRICING_FILE` 替换。
 
 注意：内置表是快照（文件里有 `updated` 时间戳）；context 阶梯价（`>200k`）、缓存写价与转售商加价不建模；公开渠道查不到价格的模型保持 `$0.00*`。需要精确账单请把自建表放到 `CODEX_USAGE_PRICING_FILE`。数据源、字段映射与许可见 [docs/pricing.md](docs/pricing.md)。

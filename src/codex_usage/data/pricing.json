@@ -1,6 +1,6 @@
 {
-  "source": "models.dev",
-  "updated": "2026-09-13T11:22:29+00:00",
+  "source": "models.dev (2026-09-13 snapshot) + OpenAI model pages (Sol/Luna rates verified 2026-09-30)",
+  "updated": "2026-09-30T04:34:56+00:00",
   "models": [
     {"modelId": "gpt-5-nano", "inputCostPerMillion": 0.05, "cacheReadCostPerMillion": 0.005, "outputCostPerMillion": 0.4},
     {"modelId": "gpt-4.1-nano", "inputCostPerMillion": 0.1, "cacheReadCostPerMillion": 0.025, "outputCostPerMillion": 0.4},
@@ -2087,6 +2087,9 @@
     {"modelId": "glm5.2-fast", "inputCostPerMillion": 3.0, "cacheReadCostPerMillion": 0.5, "outputCostPerMillion": 10.25},
     {"modelId": "mimo-v2.5-pro-ultraspeed", "inputCostPerMillion": 1.305, "cacheReadCostPerMillion": 0.0108, "outputCostPerMillion": 2.61},
     {"modelId": "xpersona-gpt-5.5", "inputCostPerMillion": 3.0, "cacheReadCostPerMillion": 0.3, "outputCostPerMillion": 18.0},
-    {"modelId": "xpersona-frieren-coder", "inputCostPerMillion": 1.5, "cacheReadCostPerMillion": 0.15, "outputCostPerMillion": 6.0}
+    {"modelId": "xpersona-frieren-coder", "inputCostPerMillion": 1.5, "cacheReadCostPerMillion": 0.15, "outputCostPerMillion": 6.0},
+    {"modelId": "gpt-6.1-sol", "inputCostPerMillion": 2.0, "cacheReadCostPerMillion": 0.1, "outputCostPerMillion": 10.0},
+    {"modelId": "gpt-6-sol", "inputCostPerMillion": 2.0, "cacheReadCostPerMillion": 0.2, "outputCostPerMillion": 10.0},
+    {"modelId": "gpt-6-luna", "inputCostPerMillion": 0.1, "cacheReadCostPerMillion": 0.01, "outputCostPerMillion": 0.5}
   ]
 }
