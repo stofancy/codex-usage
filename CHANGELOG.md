@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- TPS in all table views and session/model JSON: time-weighted end-to-end output
+  throughput from complete single-model turns, including tool execution and waiting.
+  Missing, clipped, in-progress, and mixed-model timing remains unknown (`-` / `null`).
+  Existing token and cost fields keep their accounting; `--schema` describes `tps`.
+
 ### Fixed
 
 - Added bundled Standard and Fast API prices for `gpt-6.1-sol`, `gpt-6-sol`, and

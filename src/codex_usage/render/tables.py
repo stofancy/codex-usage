@@ -1,7 +1,7 @@
 """终端表格视图（rich 实现：CJK 宽字符精确对齐、颜色、无 TTY 自动去色）。
 
-布局约定：所有表格的末 9 列固定为 净输入/缓存读/命中率/输出/总 tokens/调用/单次成本/
-每百万 tokens/成本，行构造一律走 _metric_row（cells_before + 9 个数字），防止单元格数与列数错位——
+布局约定：所有表格的末 10 列固定为 净输入/缓存读/命中率/输出/总 tokens/调用/单次成本/
+每百万 tokens/TPS/成本，行构造一律走 _metric_row（cells_before + 10 个数字），防止单元格数与列数错位——
 rich 对超出的单元格会静默加宽表格，导致合计行数字跑到表头之外。
 """
 
@@ -41,11 +41,14 @@ def _note(rec: Session) -> str:
 
 
 def _acc() -> list:
-    """累计器 [net, cached, out, calls, cost, known]，与 aggregate_models 槽位前 6 位一致。"""
-    return [0, 0, 0, 0, 0.0, True]
+    """累计器 [net, cached, out, calls, cost, known, timed_out, seconds]。"""
+    return [0, 0, 0, 0, 0.0, True, 0.0, 0.0]
 
 
-def _merge_acc(acc: list, net: int, cached: int, out: int, calls: int, cost: float, known: bool):
+def _merge_acc(acc: list, net: int, cached: int, out: int, calls: int, cost: float, known: bool,
+               timed_out: float = 0.0, seconds: float = 0.0):
+    acc[6] += timed_out
+    acc[7] += seconds
     acc[0] += net
     acc[1] += cached
     acc[2] += out
@@ -78,25 +81,26 @@ def _per_mtok_s(cost: float, total: int, known: bool) -> str:
 
 
 def _metric_row(tb: Table, cells_before: list, acc: list, style: str | None = None):
-    """数字指标行：末 9 列为 净输入/缓存读/命中率/输出/总/调用/单次成本/每百万 tokens/成本。
+    """数字指标行：末 10 列为 净输入/缓存读/命中率/输出/总/调用/单次成本/每百万 tokens/TPS/成本。
 
-    cells_before 为数字列之前的单元格（标签+留空），其长度 + 9 必须等于表格列数；
+    cells_before 为数字列之前的单元格（标签+留空），其长度 + 10 必须等于表格列数；
     不匹配说明调用方列布局写错了（rich 会静默加宽表格导致错位），直接断言拦截。
     """
-    assert len(tb.columns) == len(cells_before) + 9, \
-        f"列布局不匹配: 表格 {len(tb.columns)} 列 vs 前置 {len(cells_before)} + 9 数字列"
-    net, cached, out, calls, cost, known = acc
+    assert len(tb.columns) == len(cells_before) + 10, \
+        f"列布局不匹配: 表格 {len(tb.columns)} 列 vs 前置 {len(cells_before)} + 10 数字列"
+    net, cached, out, calls, cost, known, timed_out, seconds = acc
     total = net + cached + out
     vals = [f"{net:,}", f"{cached:,}", _hit_s(net, cached), f"{out:,}",
             f"{total:,}", f"{calls:,}", _unit_cost_s(cost, calls, known),
             _per_mtok_s(cost, total, known),
+            f"{timed_out / seconds:.1f}" if seconds > 0 else "-",
             f"${cost:,.2f}" + ("" if known else "*")]
     tb.add_row(*cells_before, *(Text(v, style=style) for v in vals))
 
 
 def _add_metric_columns(tb: Table):
     for col in ("净输入", "缓存读", "命中率", "输出", "总 tokens", "调用",
-                "单次成本", "每百万 tokens", "成本"):
+                "单次成本", "每百万 tokens", "TPS", "成本"):
         tb.add_column(col, justify="right")
 
 
@@ -127,8 +131,8 @@ def view_flat(recs: list[Session], pricing: dict):
         mm = r.primary_model + ("+mix" if r.multi_model else "")
         _metric_row(tb, [f"{d[5:]} {t}", r.sid[:13], _type_cell(r.type), _note(r),
                          _model_cell(mm)],
-                    [gin - ca, ca, out, calls, cost, known])
-        _merge_acc(acc, gin - ca, ca, out, calls, cost, known)
+                    [gin - ca, ca, out, calls, cost, known, *stats.rec_timing(r)])
+        _merge_acc(acc, gin - ca, ca, out, calls, cost, known, *stats.rec_timing(r))
     _metric_row(tb, [Text(f"合计 {len(recs)} 会话", style="bold"), "", "", "", ""], acc, style="bold")
     console().print(tb)
     print_unknown_note(recs, pricing)
@@ -143,8 +147,8 @@ def view_models(recs: list[Session], pricing: dict):
     _add_metric_columns(tb)
     tot = _acc()
     for mname, a in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
-        _metric_row(tb, [_model_cell(mname), f"{a[6]}"], a[:6])
-        _merge_acc(tot, *a[:6])
+        _metric_row(tb, [_model_cell(mname), f"{a[6]}"], a[:6] + a[7:9])
+        _merge_acc(tot, *(a[:6] + a[7:9]))
     _metric_row(tb, [Text(f"合计 {len(recs)} 会话", style="bold"), ""], tot, style="bold")
     console().print(tb)
     print_unknown_note(recs, pricing)
@@ -167,8 +171,8 @@ def view_by_day(recs: list[Session], pricing: dict, by_model: bool):
             agg = stats.aggregate_models(by_day[d], pricing)
             dtot = _acc()
             for mname, a in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
-                _metric_row(tb, [d, _model_cell(mname), f"{a[6]}"], a[:6])
-                _merge_acc(dtot, *a[:6])
+                _metric_row(tb, [d, _model_cell(mname), f"{a[6]}"], a[:6] + a[7:9])
+                _merge_acc(dtot, *(a[:6] + a[7:9]))
             tb.add_section()
             _metric_row(tb, [Text("小计", style="dim"), Text("当日合计", style="dim"), ""],
                         dtot, style="dim")
@@ -180,7 +184,7 @@ def view_by_day(recs: list[Session], pricing: dict, by_model: bool):
             gin, ca, out = stats.rec_tokens(r)
             cost, known = stats.rec_cost(r, pricing)
             _merge_acc(day_agg.setdefault(d, _acc()),
-                       gin - ca, ca, out, stats.rec_calls(r), cost, known)
+                       gin - ca, ca, out, stats.rec_calls(r), cost, known, *stats.rec_timing(r))
         for d in sorted(day_agg):
             _metric_row(tb, [d], day_agg[d])
             _merge_acc(grand, *day_agg[d])
@@ -219,8 +223,8 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
             agg = stats.aggregate_models(members, pricing)
             acc = _acc()
             for mname, a in sorted(agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1])):
-                _metric_row(tb, ["", "", "", "", _model_cell(mname)], a[:6])
-                _merge_acc(acc, *a[:6])
+                _metric_row(tb, ["", "", "", "", _model_cell(mname)], a[:6] + a[7:9])
+                _merge_acc(acc, *(a[:6] + a[7:9]))
             return acc
 
         def render_family(root: Session, children: list[Session], note_override: str | None = None):
@@ -246,8 +250,10 @@ def view_families(recs: list[Session], pricing: dict, by_model: bool, by_day: bo
                     _metric_row(tb, [f"{d[5:]} {t}", m.sid[:13], _type_cell(m.type),
                                      Text(note, style="cyan") if note else Text(_note(m)),
                                      _model_cell(mm)],
-                                [gin - ca, ca, out, stats.rec_calls(m), cost, known])
-                    _merge_acc(acc, gin - ca, ca, out, stats.rec_calls(m), cost, known)
+                                [gin - ca, ca, out, stats.rec_calls(m), cost, known,
+                                 *stats.rec_timing(m)])
+                    _merge_acc(acc, gin - ca, ca, out, stats.rec_calls(m), cost, known,
+                               *stats.rec_timing(m))
             if len(members) > 1:
                 tb.add_section()
                 _metric_row(tb, [Text("家族小计", style="dim"), "", "", "", ""], acc, style="dim")

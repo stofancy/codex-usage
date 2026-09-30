@@ -106,6 +106,7 @@ _JSON_FIELDS = {
                                            "无 tokens 时为 null"},
     "output": {"type": "integer", "unit": "tokens", "meaning": "输出"},
     "total_tokens": {"type": "integer", "unit": "tokens", "meaning": "毛输入 + 输出 = 净输入 + 缓存读 + 输出"},
+    "tps": {"type": "number|null", "unit": "tokens/s", "meaning": "端到端 TPS = 完整轮次输出 ÷ 秒数，含工具和等待；仅统计完整单模型轮次，缺计时为 null；聚合按合计输出 ÷ 合计秒数"},
     "calls": {"type": "integer", "meaning": "API 调用次数（token_count 轮次）"},
     "cost_usd_known": {"type": "number", "unit": "USD", "meaning": "按定价折算的成本（无定价按 0）"},
     "pricing_full": {"type": "boolean", "meaning": "是否所有模型都有定价"},
@@ -127,6 +128,7 @@ _MODEL_FIELDS = {
                                            "无 tokens 时为 null"},
     "output": {"type": "integer", "unit": "tokens", "meaning": "输出"},
     "reasoning": {"type": "integer", "unit": "tokens", "meaning": "推理输出"},
+    "tps": {"type": "number|null", "unit": "tokens/s", "meaning": "端到端 TPS = 完整轮次输出 ÷ 秒数，含工具和等待；仅统计完整单模型轮次，缺计时为 null；聚合按合计输出 ÷ 合计秒数"},
     "calls": {"type": "integer", "meaning": "该模型参与调用的轮次"},
 }
 
@@ -144,7 +146,7 @@ _METRICS = {
 }
 
 _TABLE_COLUMNS = ["净输入", "缓存读", "命中率", "输出", "总 tokens", "调用",
-                  "单次成本", "每百万 tokens", "成本"]
+                  "单次成本", "每百万 tokens", "TPS", "成本"]
 
 _DATA_SOURCES = {
     "sessions_dir": {"env": "CODEX_USAGE_SESSIONS_DIR", "default": "~/.codex/sessions",

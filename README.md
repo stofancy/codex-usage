@@ -79,6 +79,7 @@ Missing parts are filled with 0 for `--since` (`20260912-16` → 16:00:00) and w
 | Net input / Cache read / Output | token counts; net input = gross input − cache read |
 | Hit rate | cache read ÷ gross input (gross input includes cache read) — the API's `cached_tokens / input_tokens` ratio; aggregates are **weighted** (Σ cache read ÷ Σ gross input), never an average of per-row percentages; shows `-` when there is no input at all |
 | Total tokens | net input + cache read + output |
+| TPS | End-to-end output tokens/second: summed output (including reasoning) divided by summed duration of complete single-model turns, including tools and waiting. Requires matching `task_started` / `task_complete` within the selected window. Missing timing shows `-`; session and model JSON `tps` is `null`. In-progress and mixed-model turns are excluded from TPS. |
 | Calls | number of API calls (`token_count` turns, attributed to the model in effect at that time) |
 | Cost/call | cost ÷ calls; `-` when there are no calls |
 | Per 1M tokens | cost ÷ total tokens × 1e6 — the blended effective unit price after cache discounts; aggregates are **weighted** (Σ cost ÷ Σ tokens), `-` when there are no tokens, `*` when a model is unpriced |

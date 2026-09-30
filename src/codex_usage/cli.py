@@ -99,6 +99,7 @@ def _emit_json(recs, pricing):
             "last_ts": r.last_local.isoformat() if r.last_local else None,
             "models": {m: {"input_gross": v[0], "cached": v[1], "output": v[2],
                            "reasoning": v[3], "calls": v[4],
+                           "tps": stats.rec_tps(r, m),
                            "cache_hit_rate": round(v[1] / v[0], 4) if v[0] else None,
                            "cost_per_million_tokens": (
                                round((stats.rec_model_cost(r, m, pricing) or 0.0)
@@ -111,6 +112,7 @@ def _emit_json(recs, pricing):
             "cost_per_million_tokens": (round(cost / (gin + out) * 1_000_000, 4)
                                         if gin + out else None),         # 成本/总tokens
             "calls": stats.rec_calls(r),
+            "tps": stats.rec_tps(r),
             "cost_usd_known": round(cost, 4), "pricing_full": known,
             "last_cumulative_total": r.final_total,
             # 计量口径诊断：累计值回落（压缩重置）次数、缺累计回退次数、旧口径对照值

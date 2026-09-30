@@ -86,19 +86,38 @@ def rec_calls(rec: Session) -> int:
     return sum(v[4] for v in rec.models.values())
 
 
+def rec_timing(rec: Session, model: str | None = None) -> tuple[float, float]:
+    """Output and seconds for timed turns, restricted to the selected models."""
+    samples = [rec.timing[m] for m in rec.models if m in rec.timing
+               and (model is None or m == model)]
+    return sum(s[0] for s in samples), sum(s[1] for s in samples)
+
+
+def tps(output: float, seconds: float) -> float | None:
+    """End-to-end output tokens/second; missing timing remains unknown."""
+    return output / seconds if seconds > 0 else None
+
+
+def rec_tps(rec: Session, model: str | None = None) -> float | None:
+    return tps(*rec_timing(rec, model))
+
+
 def aggregate_models(recs: list[Session], pricing: dict) -> dict[str, list]:
-    """聚合一组会话 → {model: [net, cached, out, calls, cost, known, nsess]}，按会话去重计数。"""
+    """聚合一组会话 → {model: [net, cached, out, calls, cost, known, nsess, timed_out, seconds]}，按会话去重计数。"""
     agg: dict[str, list] = {}
     cfg = default_service_tier()
     for r in recs:
         seen = set()
         for mname, v in r.models.items():
             c = rec_model_cost(r, mname, pricing, cfg)
-            a = agg.setdefault(mname, [0, 0, 0, 0, 0.0, True, 0])
+            a = agg.setdefault(mname, [0, 0, 0, 0, 0.0, True, 0, 0.0, 0.0])
             a[0] += v[0] - v[1]
             a[1] += v[1]
             a[2] += v[2]
             a[3] += v[4]
+            timed_out, seconds = rec_timing(r, mname)
+            a[7] += timed_out
+            a[8] += seconds
             a[4] += c or 0.0
             a[5] = a[5] and (c is not None)
             if mname not in seen:

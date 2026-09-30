@@ -44,7 +44,9 @@ class Session:
     # model -> 计量档位（thread_settings_applied 的 service_tier 原值；没出现过则 "unknown"）
     #         -> [gross_in, cached, out, reasoning, calls]，用于 priority/Fast 档倍率定价
     tiers: dict[str, dict[str, list[int]]] = field(default_factory=dict)
-    # 旧口径（逐轮 last_token_usage 累加，毛输入+输出）对照值：与累计差分交叉校验
+    # model -> [timed output tokens, completed turn seconds]; end-to-end timing
+    timing: dict[str, list[float]] = field(default_factory=dict)
+    # 旧口径（逐轮 last_token_usage 累加，毛输入+输出）对照值
     delta_sum: int = 0
     # 诊断：累计值下降（上下文压缩重置）次数、缺 total_token_usage 回退次数
     resets: int = 0
@@ -150,6 +152,10 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
     rec = Session(file=path, sid=uuids[0], uuids=uuids)
     per_model: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0])
     prev_total: list[int] | None = None          # 上一事件的累计快照
+    turn_start: datetime | None = None
+    turn_id = None
+    turn_outputs: dict[str, int] = {}
+    turn_in_window = True
     current_model = "unknown"
     current_tier = "unknown"                     # 没有任何 thread_settings 时按 unknown
     try:
@@ -189,6 +195,31 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                         current_tier = str(tier)
                     if st.get("model") and current_model == "unknown":
                         current_model = st["model"]
+                elif '"task_started"' in tag:
+                    obj = json.loads(line)
+                    turn_start = to_local(obj.get("timestamp"))
+                    turn_id = obj.get("payload", {}).get("turn_id")
+                    turn_outputs = {}
+                    turn_in_window = (window is None or (turn_start is not None
+                                      and window[0] <= turn_start <= window[1]))
+                elif '"task_complete"' in tag:
+                    obj = json.loads(line)
+                    payload = obj.get("payload", {})
+                    end = to_local(obj.get("timestamp"))
+                    # A complete, single-model turn is the attribution boundary.
+                    # Tool time and waiting are included in this end-to-end rate.
+                    if (turn_start is not None and end is not None and turn_id is not None
+                            and payload.get("turn_id") == turn_id and turn_in_window
+                            and (window is None or window[0] <= end <= window[1])
+                            and len(turn_outputs) == 1):
+                        seconds = (end - turn_start).total_seconds()
+                        if seconds > 0:
+                            model, output = next(iter(turn_outputs.items()))
+                            sample = rec.timing.setdefault(model, [0.0, 0.0])
+                            sample[0] += output
+                            sample[1] += seconds
+                    turn_start = None
+                    turn_outputs = {}
                 elif '"token_count"' in tag:
                     obj = json.loads(line)
                     info = obj.get("payload", {}).get("info") or {}
@@ -196,6 +227,7 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                     if window is not None:
                         ws, we = window
                         if tl is None or not (ws <= tl <= we):
+                            turn_in_window = False
                             continue
                     if tl:
                         if rec.first_local is None or tl < rec.first_local:
@@ -237,6 +269,9 @@ def parse_rollout(path: str, window: tuple[datetime, datetime] | None = None) ->
                         rec.fallbacks += 1                       # 缺累计值：回退逐轮增量
                         delta = last_v
                     if any(delta):
+                        if turn_start is not None:
+                            turn_outputs[current_model] = (turn_outputs.get(current_model, 0)
+                                                           + max(0, delta[2]))
                         slot = per_model[current_model]
                         slot[4] += 1                             # 一次 API 调用（有效轮次）
                         for i in range(4):
@@ -319,6 +354,10 @@ def collect(sessions_dir: str, since: datetime, until: datetime,
                 dslot = dest.setdefault(tname, [0, 0, 0, 0, 0])
                 for i in range(5):
                     dslot[i] += tslot[i]
+        for model, sample in r.timing.items():
+            dest_sample = old.timing.setdefault(model, [0.0, 0.0])
+            for i in range(2):
+                dest_sample[i] += sample[i]
         old.delta_sum += r.delta_sum
         old.resets += r.resets
         old.fallbacks += r.fallbacks
