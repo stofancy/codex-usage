@@ -26,8 +26,8 @@ from datetime import datetime
 from rich.console import Console
 
 from . import __version__, config, selfdoc, stats
-from .parser import collect, parse_time_arg
-from .pricing import load_pricing, model_cost
+from .parser import Session, collect, parse_time_arg
+from .pricing import load_pricing
 from .render import charts, imgcharts, tables
 
 KNOWN_FLAGS = {"--since", "--until", "--by-day", "--family", "--raw", "--by-model",
@@ -101,7 +101,7 @@ def _emit_json(recs, pricing):
                            "reasoning": v[3], "calls": v[4],
                            "cache_hit_rate": round(v[1] / v[0], 4) if v[0] else None,
                            "cost_per_million_tokens": (
-                               round((model_cost(pricing, m, v[0] - v[1], v[1], v[2]) or 0.0)
+                               round((stats.rec_model_cost(r, m, pricing) or 0.0)
                                      / (v[0] + v[2]) * 1_000_000, 4)
                                if v[0] + v[2] else None)}
                        for m, v in r.models.items()},
@@ -141,22 +141,15 @@ def _day_series(recs, pricing):
     return agg
 
 
-def _model_metric(mname: str, v: list, metric: str, pricing: dict) -> float:
-    """单模型原始槽 [毛输入, 缓存读, 输出, 推理, 调用] → 图表指标值。
-
-    total = 毛输入 + 输出（= 净输入 + 缓存读 + 输出）：毛输入已含缓存读，不能用 sum(v[:3])，
-    否则缓存读被计两次（实测真实数据虚高 94%）。
-    """
-    if metric == "cost":
-        return model_cost(pricing, mname, v[0] - v[1], v[1], v[2]) or 0.0
-    if metric == "hit":
-        return v[1] / v[0] if v[0] else 0.0        # 缓存读 / 毛输入（v[0] 已含缓存读）
-    if metric == "per_mtok":
-        total = v[0] + v[2]                        # 总 tokens = 毛输入 + 输出
-        if not total:
-            return 0.0
-        return (model_cost(pricing, mname, v[0] - v[1], v[1], v[2]) or 0.0) / total * 1_000_000
-    return {"input": v[0] - v[1], "cache": v[1], "output": v[2], "total": v[0] + v[2]}[metric]
+def _model_day_series(recs: list[Session], pricing: dict, days: list[str],
+                      metric: str) -> dict[str, list[float]]:
+    """逐天聚合模型用量再算指标：成本按档位，比率按合计分子/分母。"""
+    daily = {day: stats.aggregate_models(rs, pricing)
+             for day, rs in stats.group_by_day(recs).items()}
+    models = dict.fromkeys(m for agg in daily.values() for m in agg)
+    empty = [0, 0, 0, 0, 0.0, True, 0]
+    return {m: [round(charts.metric_of(daily[d].get(m, empty), metric), 4) for d in days]
+            for m in models}
 
 
 def _use_image(args) -> bool:
@@ -199,15 +192,7 @@ def _chart_draw(args, recs, pricing, render, emit):
         if args.by_day and args.by_model:
             day_agg = _day_series(recs, pricing)
             days = sorted(day_agg)
-            models = stats.aggregate_models(recs, pricing)
-            series = {}
-            for m in models:
-                per_model_day = defaultdict(float)
-                for r in recs:
-                    d, _ = stats.fmt_dt(r)
-                    if m in r.models:
-                        per_model_day[d] += _model_metric(m, r.models[m], metric, pricing)
-                series[m] = [round(per_model_day.get(d, 0), 4) for d in days]
+            series = _model_day_series(recs, pricing, days, metric)
             emit(render.chart_bar([d[5:] for d in days], series, stacked=True,
                                   title=f"每天{title_metric}·堆叠"))
         elif args.by_day:
@@ -229,15 +214,7 @@ def _chart_draw(args, recs, pricing, render, emit):
     days = sorted(agg)
     labels = [d[5:] for d in days]
     if args.by_model:
-        models = stats.aggregate_models(recs, pricing)
-        series = {}
-        for m in models:
-            per_model_day = defaultdict(float)
-            for r in recs:
-                d, _ = stats.fmt_dt(r)
-                if m in r.models:
-                    per_model_day[d] += _model_metric(m, r.models[m], metric, pricing)
-            series[m] = [round(per_model_day.get(d, 0), 4) for d in days]
+        series = _model_day_series(recs, pricing, days, metric)
         emit(render.chart_series(args.chart, labels, series,
                                  title=f"每天{title_metric}·按模型"))
     else:

@@ -1,6 +1,6 @@
 {
- "source": "LiteLLM model_prices_and_context_window.json @ b1a61f510c90 (2026-09-13T04:13:52Z)",
- "updated": "2026-09-13T04:13:52+00:00",
+ "source": "LiteLLM model_prices_and_context_window.json @ b1a61f510c90 (2026-09-13T04:13:52Z) + https://developers.openai.com/api/docs/models/ (Sol/Luna Fast rates verified 2026-09-30)",
+ "updated": "2026-09-30T04:34:56+00:00",
  "license": "MIT (https://github.com/BerriAI/litellm)",
  "note": "priority ≡ fast（OpenAI 2026-07-30 改名）；official = 官方 Fast/Flex 价目表有独立行，litellm = 只有第三方快照（官方无 Fast 行，低置信）。倍率仅收录官方档位模型。",
  "priority": [
@@ -334,6 +334,27 @@
    "confidence": "official"
   },
   {
+   "modelId": "gpt-6-luna",
+   "inputCostPerMillion": 0.2,
+   "cacheReadCostPerMillion": 0.02,
+   "outputCostPerMillion": 1.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-6-sol",
+   "inputCostPerMillion": 4.0,
+   "cacheReadCostPerMillion": 0.4,
+   "outputCostPerMillion": 20.0,
+   "confidence": "official"
+  },
+  {
+   "modelId": "gpt-6.1-sol",
+   "inputCostPerMillion": 4.0,
+   "cacheReadCostPerMillion": 0.2,
+   "outputCostPerMillion": 20.0,
+   "confidence": "official"
+  },
+  {
    "modelId": "o3",
    "inputCostPerMillion": 3.5,
    "cacheReadCostPerMillion": 0.875,
@@ -605,6 +626,9 @@
   "gpt-5.6-luna": 2.0,
   "gpt-5.5": 2.5,
   "gpt-5.4": 2.0,
-  "gpt-5.4-mini": 2.0
+  "gpt-5.4-mini": 2.0,
+  "gpt-6.1-sol": 2.0,
+  "gpt-6-sol": 2.0,
+  "gpt-6-luna": 2.0
  }
 }

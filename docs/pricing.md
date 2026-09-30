@@ -178,9 +178,21 @@ Flex = 0.5×。官方 Fast 表**没有** 5.1/5.2/5.3-codex 的行，只有 LiteL
 出现 Fast 轮次时保持标准价并标 `tier_priced: false`。**不做“统一 2×”兜底**：那会在 5.5 上
 少算 20%、在 gpt-4.1/4o 上多算。
 
-> **口径声明**：本仓库按 **API 等价美元**计价（Astra 2×、5.6 系 2×、5.5 2.5×、5.4 2×）。
-> ChatGPT 订阅的 credits 口径是另一套倍率（5.6/5.5 = 2.5×、Astra = 2.5×），两者不同，
-> 不混用。
+2026-09-30 按 OpenAI 官方模型页补齐以下模型的内置 Standard 与 Fast 价格；各列单位为
+**美元 / 百万 tokens**。其他模型保留原快照价格，来源日期见数据文件的 `source`。
+
+| 模型 | Standard 输入 / 缓存读 / 输出 | Fast 输入 / 缓存读 / 输出 | 官方来源 |
+| --- | --- | --- | --- |
+| `gpt-6.1-sol` | 2 / 0.1 / 10 | 4 / 0.2 / 20 | [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol) |
+| `gpt-6-sol` | 2 / 0.2 / 10 | 4 / 0.4 / 20 | [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol) |
+| `gpt-6-luna` | 0.1 / 0.01 / 0.5 | 0.2 / 0.02 / 1 | [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) |
+
+会话表格、按模型汇总、JSON 中的模型单位价与按模型分日图表共同使用 `Session.tiers`
+计价。分日的缓存命中率与单位价从合计用量和成本计算。
+
+> **口径声明**：本仓库按 **API 等价美元**计价。订阅内额度的 Fast 消耗倍率为 2.5×；
+> 额外购买 credits 的 Fast 计价倍率为 2×，见 [OpenAI Speed 说明](https://learn.chatgpt.com/docs/agent-configuration/speed)。
+> 这些订阅规则不参与美元估算。
 
 ```python
 from codex_usage import pricing
@@ -248,6 +260,6 @@ cc-switch 的 `~/.cc-switch/model-pricing.json` 仍是**最高优先级的覆盖
   比 `models` 少 4.81M 毛输入（parser 侧归因缺口），分档计价会少算这部分（≈$5.4）。
 - **快照时效**：内置表与档位价表都是生成时点的快照（见各自 `updated`），新模型/新倍率
   可能缺；无定价的模型 token 照常统计、成本显示 `$0.00*` 并在表尾提示。
-- **公开渠道没有的名字才不会算价**：内置表只来自 models.dev / LiteLLM 的公开数据；
+- **公开渠道没有的名字才不会算价**：内置表来自 models.dev / LiteLLM 及官方 OpenAI 公开价格；
   本机出现过但公开渠道未收录、且别名表未映射的名字（如 `gpt-reserve`）保持 `$0.00*`，
   可按需写进自己的 `CODEX_USAGE_PRICING_FILE` 覆盖层。

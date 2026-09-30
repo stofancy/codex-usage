@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Added bundled Standard and Fast API prices for `gpt-6.1-sol`, `gpt-6-sol`, and
+  `gpt-6-luna`, verified against OpenAI's model pages on 2026-09-30. Fast now applies
+  the published 2× API rate for input, cached input, and output on these models.
+- Per-model JSON unit prices and daily model charts now use the same recorded-tier
+  costs as tables. Daily cache-hit rates and unit prices are calculated from summed
+  tokens and costs, including days with multiple Standard/Fast sessions.
+- Tests isolate user pricing files, caches, and Codex configuration so enabling Fast
+  locally does not change test expectations.
+
 ## [0.4.0] - 2026-09-21
 
 ### Added

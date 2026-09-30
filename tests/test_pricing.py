@@ -392,12 +392,12 @@ def test_env_file_missing_falls_back_to_builtin(isolated):
 def test_source_info_reports_merged_layers(isolated):
     cache_file = isolated["cache_file"]
     write_table(cache_file, [{"modelId": "a", **price(1, 2)}, {"modelId": "b", **price(3, 4)}],
-                updated="2026-09-13T23:00:00+00:00")       # 比内置表 updated 更晚
+                updated="2026-10-01T00:00:00+00:00")       # 比内置表 updated 更晚
     info = pricing.source_info()
     assert info["source"] == "builtin+user-cache"
     assert info["path"] == str(cache_file)
     assert info["models"] >= 10                            # 合并后条数（不含归一化别名）
-    assert info["updated"] == "2026-09-13T23:00:00+00:00"  # 各层里最新
+    assert info["updated"] == "2026-10-01T00:00:00+00:00"  # 各层里最新
     assert [layer["source"] for layer in info["layers"]] == ["builtin", "user-cache"]
     assert info["layers"][0]["models"] >= 10
     assert info["layers"][1]["models"] == 2
@@ -625,6 +625,32 @@ def test_aliases_info_exposes_version_and_not_mapped(isolated):
 
 
 # ---------------------------------------------------------------- 档位（priority/Fast）价
+
+
+@pytest.mark.parametrize("model,rates", [
+    ("gpt-6.1-sol", (2.0, 0.1, 10.0)),
+    ("gpt-6-sol", (2.0, 0.2, 10.0)),
+    ("gpt-6-luna", (0.1, 0.01, 0.5)),
+])
+@pytest.mark.parametrize("tier", ["fast", "priority"])
+def test_current_sol_luna_fast_rates_work_without_user_prices(isolated, model, rates, tier):
+    """新模型离线安装后可计价；Fast 的输入、缓存读、输出均按官方 2× API 价。"""
+    table = pricing.load_pricing()
+    standard = pricing.model_cost_detail(table, model, 1_000_000, 1_000_000, 1_000_000,
+                                         tier="standard")
+    fast = pricing.model_cost_detail(table, model, 1_000_000, 1_000_000, 1_000_000,
+                                     tier=tier)
+    assert standard is not None and fast is not None
+    assert standard["cost_usd"] == pytest.approx(sum(rates))
+    assert fast["cost_usd"] == pytest.approx(2 * sum(rates))
+    assert fast["standard_cost_usd"] == pytest.approx(sum(rates))
+    assert fast["tier_priced"] is True
+    assert fast["tier_confidence"] == "official"
+    assert pricing.tier_multiplier(table, model, tier) == pytest.approx(2.0)
+    assert pricing.model_cost(table, model, 1_000_000, 1_000_000, 1_000_000,
+                              tier="unknown", config_tier="fast") == pytest.approx(2 * sum(rates))
+    assert pricing.model_cost(table, model, 1_000_000, 1_000_000, 1_000_000,
+                              tier="standard", config_tier="fast") == pytest.approx(sum(rates))
 
 
 def test_tier_priority_uses_fast_price():

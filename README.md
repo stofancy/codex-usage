@@ -111,7 +111,7 @@ A model with no pricing entry: tokens are still counted, cost is $0, the row is 
 
 ## Pricing
 
-Token counting is always local; only the cost column needs prices. `codex-usage` ships a **built-in public price snapshot** (from `models.dev`: 2086 priced models at the time of writing), so cost estimation works offline right after install. Three layers are merged by `modelId`, with higher-priority entries overriding lower ones:
+Token counting is always local; only the cost column needs prices. `codex-usage` ships a **built-in public price snapshot** (2089 priced models, including official OpenAI Sol/Luna rates verified on 2026-09-30), so cost estimation works offline right after install. Three layers are merged by `modelId`, with higher-priority entries overriding lower ones:
 
 | Priority | Source | Role |
 |---|---|---|
@@ -133,7 +133,7 @@ Model names found in sessions are matched exactly, then normalized (case, provid
 Three details shape the resulting numbers:
 
 - **Cache reads without a price.** About a third of the effective table (33.6%) has no `cacheReadCostPerMillion`. For those models, cached reads are charged at the model's **input price** instead of $0 — a deliberate upper bound (real cache-read prices are around 10% of input), so the estimate can over-count but not silently under-count.
-- **Service tiers.** Codex records which tier a turn ran under. `priority` and `fast` are the same tier (OpenAI renamed priority processing to Fast) and are priced with the official per-model Fast rates — 2.0× standard for Astra and the 5.6 Sol/Terra/Luna family, 2.5× for `gpt-5.5` — while `flex` is 0.5×. Prices are **API-equivalent USD**, not the ChatGPT subscription credit multipliers (a different rate card). Models without a public Fast price (for example `gpt-5-codex`) stay at the standard price and report `tier_priced: false`.
+- **Service tiers.** Codex records which tier a turn ran under. `priority` and `fast` are the same tier (OpenAI renamed priority processing to Fast) and are priced with the official per-model Fast rates — 2.0× standard for `gpt-6.1-sol`, GPT-6 Sol/Luna/Astra, and the 5.6 Sol/Terra/Luna family, 2.5× for `gpt-5.5` — while `flex` is 0.5×. Prices are **API-equivalent USD**, not the ChatGPT subscription credit multipliers (a different rate card). Models without a public Fast price (for example `gpt-5-codex`) stay at the standard price and report `tier_priced: false`.
 - **Labels with no public price.** `codex-auto-review` has no price fields in any public source, so it goes through an auditable alias table (`src/codex_usage/data/model_aliases.json`) that maps it to `gpt-5.5` and flags the mapping `assumed: true` (following ccusage's dated fallback table and a three-way token reconciliation). `gpt-reserve` has no public price from any source, so it stays `$0.00*` instead of being guessed. The alias table and the tier price table can be replaced with `CODEX_USAGE_ALIASES_FILE` and `CODEX_USAGE_TIER_PRICING_FILE`.
 
 Caveats: the built-in table is a snapshot (it carries an `updated` timestamp); context-tier prices (`>200k`), cache-write pricing and per-reseller markups are not modelled; a model that no public channel prices stays `$0.00*`. Point `CODEX_USAGE_PRICING_FILE` at your own table if you need exact billing. Sources, field mapping and licenses are documented in [docs/pricing.md](docs/pricing.md).
